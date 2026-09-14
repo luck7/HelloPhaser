@@ -1,0 +1,102 @@
+# ==============================================
+# OS & Editor
+# ==============================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+
+# ==============================================
+# IDE / Editor
+# ==============================================
+
+# VSCode
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# JetBrains (PhpStorm, WebStorm, IDEA, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+
+# ==============================================
+# Node / Frontend Build Outputs (预留扩展)
+# ==============================================
+
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+.vite/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# npm / yarn / pnpm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==============================================
+# Phaser Editor / Game Assets (Temp)
+# ==============================================
+
+# Phaser Editor 临时文件与缓存
+.tmp/
+temp/
+assets/thumbnails/
+*.bak
+
+# ==============================================
+# Deploy / Backup
+# ==============================================
+
+deploy/
+backup/
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# ==============================================
+# Logs
+# ==============================================
+
+logs/
+*.log
+npm-log*
+yarn-log*
+
+# ==============================================
+# Environment variables
+# ==============================================
+
+.env
+.env.local
+.env.*.local

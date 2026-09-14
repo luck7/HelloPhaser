@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Battle City</title>
+    <style>
+        html, body { margin: 0; height: 100%; background: #000; }
+        #game-container { width: 100%; height: 100%; }
+    </style>
+    <script src="./phaser.js"></script>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <!-- 1 工具函数层（最先：被所有实体/场景共享） -->
+    <script src="./src/utils/constants.js"></script>
+    <script src="./src/utils/objectPool.js"></script>
+
+    <!-- 2 实体类层（依赖 utils，被场景实例化） -->
+    <script src="./src/entities/TankBase.js"></script>
+    <script src="./src/entities/Bullet.js"></script>
+    <script src="./src/entities/PlayerTank.js"></script>
+
+    <!-- 2.5 数据配置层（依赖 constants 枚举，被场景读取） -->
+    <script src="./src/data/tank_config.js"></script>
+    <script src="./src/data/level_maps.js"></script>
+
+    <!-- 3 场景层（按运行时流转顺序排列） -->
+    <script src="./src/scenes/Boot.js"></script>
+    <script src="./src/scenes/Preloader.js"></script>
+    <script src="./src/scenes/MainMenu.js"></script>
+    <script src="./src/scenes/Game.js"></script>
+
+    <!-- 4 入口（最后：依赖所有场景类） -->
+    <script src="./src/main.js"></script>
+</body>
+</html>
