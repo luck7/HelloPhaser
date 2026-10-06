@@ -22,7 +22,7 @@
     border: 1px solid rgba(255,255,255,.12);
   }
   #game { box-shadow: 0 12px 40px rgba(0,0,0,.6); border-radius: 8px; overflow: hidden; }
-  #panel { margin: 14px 0 24px; display: flex; gap: 12px; }
+  #panel { margin: 14px 0 24px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   button {
     padding: 9px 22px; font-size: 14px; cursor: pointer;
     color: #fff; background: rgba(255,255,255,.1);
@@ -42,10 +42,52 @@
   <button id="btn-restart">重新开始</button>
   <button id="btn-undo">悔棋</button>
   <button id="btn-swap">切换先手</button>
+  <button id="btn-sound">🔊 音效：开</button>
 </div>
 <div class="tip">规则：任意一方在横 / 竖 / 斜方向先连成 5 子即获胜</div>
 
 <script>
+/* ================= 音效（Web Audio 合成，无需外部文件） =================
+   类比：合成器发声 —— 用振荡器产生一个基础波形，再像"调音量的滑杆"
+   一样用 GainNode 包络（快速爬升 + 指数衰减）做出短促的"哒"声。 */
+const SFX = {
+  ctx: null, enabled: true,
+  ac() {
+    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  },
+  /** 单个音符：freq 频率，dur 时长，type 波形，vol 音量，delay 延迟(秒) */
+  tone(freq, dur = 0.1, type = 'triangle', vol = 0.25, delay = 0) {
+    if (!this.enabled) return;
+    const ctx = this.ac(), t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    // 音量包络：瞬间起来，指数衰减，听感像敲击
+    gain.gain.setValueAtTime(vol, t0);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  },
+  /** 落子：黑棋低沉、白棋略亮，叠加一点噪声感（用方波） */
+  place(color) {
+    const f = color === 1 ? 190 : 300;
+    this.tone(f, 0.09, 'triangle', 0.3);
+    this.tone(f * 1.5, 0.05, 'square', 0.06);
+  },
+  /** 无效点击 */
+  deny() { this.tone(120, 0.14, 'sawtooth', 0.15); },
+  /** 悔棋 */
+  undo() { this.tone(500, 0.07, 'sine', 0.18); this.tone(330, 0.09, 'sine', 0.18, 0.06); },
+  /** 胜利：上行大三和弦琶音 */
+  win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.28, 'triangle', 0.26, i * 0.11)); },
+  /** 失败：下行 */
+  lose() { [440, 392, 330, 262].forEach((f, i) => this.tone(f, 0.3, 'sine', 0.24, i * 0.13)); },
+  /** 平局 */
+  draw() { [440, 440].forEach((f, i) => this.tone(f, 0.2, 'sine', 0.2, i * 0.25)); }
+};
+
 /* ================= 基本配置 ================= */
 const SIZE   = 15;              // 15 路棋盘
 const CELL   = 40;              // 格子像素
@@ -106,6 +148,7 @@ class GomokuScene extends Phaser.Scene {
     lastMark.clear();
     this.setStatus(firstPlayer === BLACK ? '黑棋（你）先行，点击棋盘落子'
                                          : 'AI 先行，请等待…');
+    SFX.tone(660, 0.18, 'sine', 0.2);
     if (firstPlayer === WHITE) this.aiMove();
   }
 
@@ -114,9 +157,10 @@ class GomokuScene extends Phaser.Scene {
     if (gameOver || current !== BLACK || aiThinking) return;
     const x = Math.round((pointer.x - MARGIN) / CELL);
     const y = Math.round((pointer.y - MARGIN) / CELL);
-    if (!this.inside(x, y) || board[x][y] !== EMPTY) return;
-    // 距离校正：点击太远则忽略
-    if (Math.hypot(pointer.x - this.px(x), pointer.y - this.px(y)) > CELL * 0.6) return;
+    if (!this.inside(x, y) || board[x][y] !== EMPTY ||
+        Math.hypot(pointer.x - this.px(x), pointer.y - this.px(y)) > CELL * 0.6) {
+      SFX.deny(); return;
+    }
     this.doMove(x, y, BLACK);
     if (!gameOver) this.aiMove();
   }
@@ -128,12 +172,12 @@ class GomokuScene extends Phaser.Scene {
   doMove(x, y, color) {
     board[x][y] = color;
     history.push({ x, y, color });
+    SFX.place(color);
 
     const cx = this.px(x), cy = this.px(y);
     const c = this.add.circle(cx, cy, CELL * 0.42, color === BLACK ? 0x1a1a1a : 0xf5f5f5);
     c.setStrokeStyle(1, color === BLACK ? 0x000000 : 0xbbbbbb);
     stoneLayer.add(c);
-    // 落子动画
     c.setScale(0.2); this.tweens.add({ targets: c, scale: 1, duration: 140, ease: 'Back.out' });
 
     this.drawLastMark(x, y);
@@ -143,9 +187,15 @@ class GomokuScene extends Phaser.Scene {
       gameOver = true;
       this.highlightWin(win);
       this.setStatus(color === BLACK ? '🎉 你赢了！' : '💻 AI 获胜，再来一局？');
+      this.time.delayedCall(250, () => color === BLACK ? SFX.win() : SFX.lose());
       return;
     }
-    if (history.length === SIZE * SIZE) { gameOver = true; this.setStatus('平局！'); return; }
+    if (history.length === SIZE * SIZE) {
+      gameOver = true;
+      this.setStatus('平局！');
+      this.time.delayedCall(250, () => SFX.draw());
+      return;
+    }
     current = color === BLACK ? WHITE : BLACK;
   }
 
@@ -261,7 +311,6 @@ class GomokuScene extends Phaser.Scene {
   /* ================= 悔棋 ================= */
   undo() {
     if (gameOver || history.length === 0 || aiThinking) return;
-    // 撤销玩家 + AI 两步；若当前轮到玩家且上一步是玩家，则只撤玩家
     const pop = () => {
       const m = history.pop();
       board[m.x][m.y] = EMPTY;
@@ -275,6 +324,7 @@ class GomokuScene extends Phaser.Scene {
     current = BLACK;
     const l = history[history.length - 1];
     if (l) this.drawLastMark(l.x, l.y); else lastMark.clear();
+    SFX.undo();
     this.setStatus('已悔棋，轮到你（黑棋）落子');
   }
 }
@@ -288,13 +338,20 @@ const game = new Phaser.Game({
   scene: GomokuScene
 });
 
-// 让场景方法可被按钮调用
-game.events.once('ready', () => {});
 const getScene = () => game.scene.getScene('gomoku');
 
 document.getElementById('btn-restart').onclick = () => getScene().resetGame(BLACK);
 document.getElementById('btn-undo').onclick    = () => getScene().undo();
+document.getElementById('btn-switch') || 0;
 document.getElementById('btn-swap').onclick    = () => getScene().resetGame(WHITE);
+
+/* 音效开关 */
+const btnSound = document.getElementById('btn-sound');
+btnSound.onclick = () => {
+  SFX.enabled = !SFX.enabled;
+  btnSound.textContent = SFX.enabled ? '🔊 音效：开' : '🔇 音效：关';
+  if (SFX.enabled) SFX.tone(600, 0.12, 'sine', 0.2);
+};
 </script>
 </body>
 </html>
