@@ -6,7 +6,7 @@
 <title>Phaser 围棋 · Weiqi</title>
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 <style>
-  :root{ --bg:#241c14; --panel:#33281d; --line:#5a452c; --text:#f3e6cf; --accent:#d9a441; }
+  :root{ --bg:#241c14; --panel:#33281d; --line:#5a452c; --text:#f3e6cf; --accent:#d9a441; --row-h:26px; }
   *{ box-sizing:border-box; }
   body{
     margin:0; min-height:100vh; padding:22px; color:var(--text);
@@ -40,7 +40,7 @@
 
   /* ---- 棋谱：窗口固定总高 + 每行固定行高，超出只滚动 ---- */
   #recordWrap{
-    height:344px;                     /* 固定总高，不随手数变化 */
+    height:344px;
     display:flex; flex-direction:column; overflow:hidden;
     margin-top:4px; border:1px solid var(--line); border-radius:8px; background:#2a2118;
   }
@@ -49,16 +49,15 @@
     padding:7px 10px; font-size:12px; color:#c9a877; border-bottom:1px solid var(--line);
   }
   #recordList{
-    flex:1 1 0; min-height:0;             /* 高度只由 flex 分配决定，与内容多少无关 */
+    flex:1 1 0; min-height:0;
     display:grid; grid-template-columns:1fr 1fr;
-    grid-auto-rows:var(--row-h);          /* 每一行都是固定高度 */
-    align-content:start; gap:2px; padding:6px;
+    grid-auto-rows:var(--row-h); align-content:start; gap:2px; padding:6px;
     overflow-y:auto; overscroll-behavior:contain;
   }
   #recordList::-webkit-scrollbar{ width:8px; }
   #recordList::-webkit-scrollbar-thumb{ background:#5a452c; border-radius:4px; }
   .mv{
-    height:var(--row-h); line-height:calc(var(--row-h) - 2px);   /* 减掉上下边框 */
+    height:var(--row-h); line-height:calc(var(--row-h) - 2px);
     font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; padding:0 6px;
     border:1px solid transparent; border-radius:4px; cursor:pointer;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -70,9 +69,7 @@
   .mv.empty{ grid-column:1 / -1; color:#7a6a52; text-align:center; cursor:default; }
   .nav{ flex:0 0 auto; display:flex; gap:4px; padding:6px; border-top:1px solid var(--line); }
   .nav button{ flex:1; padding:6px 0; font-size:13px; }
-</style>
-<style>
-  :root{ --row-h:26px; }   /* 棋谱单行高度，改这里即可整体调整 */
+  .hint{ font-size:11px; opacity:.55; line-height:1.6; margin:-4px 0 8px; }
 </style>
 </head>
 <body>
@@ -80,6 +77,7 @@
   <h1>围 棋</h1>
   <div class="sub">Phaser 3 渲染 · 本地双人 / 人机对战 · 切换棋盘或模式将开始新对局</div>
   <div id="game"></div>
+  <div class="hint" style="text-align:center">把 .sgf 棋谱文件拖到棋盘上即可导入</div>
 </div>
 
 <div id="panel">
@@ -132,7 +130,10 @@
   </div>
 
   <div class="row" style="margin-top:10px">
-    <button id="btnExport">导出棋谱</button>
+    <button id="btnExport">复制棋谱</button>
+    <button id="btnExportFile">导出文件</button>
+    <button id="btnImport">导入棋谱</button>
+    <input type="file" id="fileInput" accept=".sgf,.txt" style="display:none">
   </div>
 
   <details>
@@ -142,6 +143,7 @@
     <p><b>禁自杀</b>：落子后自己这块气为 0 且没有提子，禁着。</p>
     <p><b>打劫</b>：刚形成的棋盘局面不能立刻重现（全局同形禁着），防止无限循环。</p>
     <p><b>终局</b>：双方连续停一手即终局，按中国规则数子（黑贴 3.75 子）。</p>
+    <p><b>棋谱</b>：支持标准 SGF 格式。「复制棋谱」进剪贴板，「导出文件」下载 .sgf；「导入棋谱」或把 .sgf 拖到棋盘上即可载入复盘。</p>
     <p><b>复盘</b>：点「复盘」进入，← → 逐手，Home/End 首尾，点棋谱任一手可直接跳转；再点「复盘」退出回到当前局面。</p>
   </details>
 </div>
@@ -163,6 +165,57 @@ function starPoints(n) {
   const pts = [];
   for (const r of s) for (const c of s) pts.push([r, c]);
   return pts;
+}
+
+/* ---- SGF 坐标：规范规定坐标字母不使用 i ---- */
+// 索引 → 字母：0..7 → a..h，8..18 → j..t
+function sgfCharFromIdx(i) { return String.fromCharCode(i > 7 ? 98 + i : 97 + i); }
+// 字母 → 索引：a..h → 0..7，j..t → 8..18
+function sgfIdxFromChar(ch) {
+  const c = ch.toLowerCase().charCodeAt(0) - 97;
+  if (c < 0 || c > 25) return -1;
+  return c > 8 ? c - 1 : c;
+}
+
+/* 取出第一棵树的主干，丢弃变体分支 */
+function sgfFirstGame(text) {
+  let start = -1, depth = 0, out = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') { if (depth === 0) { start = i; out = ''; } depth++; if (depth > 1) continue; out += ch; }
+    else if (ch === ')') { depth--; if (depth === 0) { out += ch; break; } if (depth < 0) break; continue; }
+    else if (depth >= 1) out += ch;
+  }
+  return start >= 0 ? out : text;
+}
+
+/* 解析 SGF：棋盘大小 + 让子 + 着手序列 */
+function parseSgf(text) {
+  const main = sgfFirstGame(String(text || '').replace(/\r/g, ''));
+  let size = 19;
+  const moves = [], setup = [];
+  const sizeM = /SZ\[(\d+)/i.exec(main);
+  if (sizeM) size = Phaser.Math.Clamp(parseInt(sizeM[1], 10) || 19, 5, 25);
+
+  for (const node of main.split(';')) {
+    const re = /([A-Za-z]{1,4})((?:\[[^\]]*\])+)/g;
+    let m;
+    while ((m = re.exec(node)) !== null) {
+      const prop = m[1].toUpperCase();
+      if (prop !== 'B' && prop !== 'W' && prop !== 'AB' && prop !== 'AW') continue;
+      const color = (prop === 'B' || prop === 'AB') ? BLACK : WHITE;
+      const vals = m[2].match(/\[[^\]]*\]/g) || [];
+      vals.forEach(v => {
+        const c = v.slice(1, -1).trim().toLowerCase();
+        if (c.length < 2) { moves.push({ color, r: -1, c: -1, pass: true }); return; }
+        const cc = sgfIdxFromChar(c[0]), rr = sgfIdxFromChar(c[1]);
+        if (cc < 0 || rr < 0 || cc >= size || rr >= size) { moves.push({ color, r: -1, c: -1, pass: true }); return; }
+        if (prop === 'AB' || prop === 'AW') setup.push({ color, r: rr, c: cc });
+        else moves.push({ color, r: rr, c: cc, pass: false });
+      });
+    }
+  }
+  return { size, moves, setup };
 }
 
 /* ================= 音效：WebAudio 实时合成，无需音频文件 ================= */
@@ -243,7 +296,7 @@ class Sfx {
     this.blip(430, { type: 'triangle', dur: 0.12, gain: 0.13, glideTo: 190 });
     this.blip(300, { type: 'triangle', dur: 0.11, gain: 0.1, glideTo: 140, delay: 0.08 });
   }
-  tick() { this.blip(720, { type: 'sine', dur: 0.05, gain: 0.07 }); }        // 复盘翻页
+  tick() { this.blip(720, { type: 'sine', dur: 0.05, gain: 0.07 }); }
   finish() { [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
     this.blip(f, { type: 'triangle', dur: 0.3, gain: 0.15, delay: i * 0.11 })); }
   start() {
@@ -269,6 +322,7 @@ class GoScene extends Phaser.Scene {
     this.showTerritory = false;
     this.scoreResult = null;
     this.busy = false;
+    this.importing = false;   // 导入中：静音、不触发 AI、不逐手重绘
     this.review = false;      // 是否处于复盘模式
     this.step = null;         // 复盘查看的手数（null = 当前局面）
 
@@ -365,13 +419,14 @@ class GoScene extends Phaser.Scene {
     return { stones: captured, ko };
   }
 
+  // 落子：返回是否成功（供导入时逐手校验）
   placeStone(r, c) {
-    if (this.gameOver) return this.flash('对局已结束，请开始新对局');
-    if (this.review) return this.flash('复盘模式中，先退出复盘');
+    if (this.gameOver) { if (!this.importing) this.flash('对局已结束，请开始新对局'); return false; }
+    if (this.review) { this.flash('复盘模式中，先退出复盘'); return false; }
     const color = this.turn;
     const sim = this.simulate(r, c, color);
-    if (!sim) { sfx.deny(); return this.flash('禁着点：这里落子会自杀'); }
-    if (sim.ko) { sfx.deny(); return this.flash('打劫禁着：不能立刻提回'); }
+    if (!sim) { if (!this.importing) { sfx.deny(); this.flash('禁着点：这里落子会自杀'); } return false; }
+    if (sim.ko) { if (!this.importing) { sfx.deny(); this.flash('打劫禁着：不能立刻提回'); } return false; }
 
     const prevBoard = this.board.map(row => row.slice());
     this.board[r][c] = color;
@@ -394,18 +449,20 @@ class GoScene extends Phaser.Scene {
     for (const [cr, cc] of sim.stones) this.removeStone(cr, cc);
     this.turn = other(color);
 
-    if (sim.stones.length) sfx.capture(sim.stones.length); else sfx.stone();
-
-    this.drawMarker();
-    this.hideHover();
-    this.refresh();
-    this.renderRecord();
-    this.afterMove();
+    if (!this.importing) {
+      if (sim.stones.length) sfx.capture(sim.stones.length); else sfx.stone();
+      this.drawMarker();
+      this.hideHover();
+      this.refresh();
+      this.renderRecord();
+      this.afterMove();
+    }
+    return true;
   }
 
   pass() {
-    if (this.gameOver) return this.flash('对局已结束，请开始新对局');
-    if (this.review) return this.flash('复盘模式中，先退出复盘');
+    if (this.gameOver) { if (!this.importing) this.flash('对局已结束，请开始新对局'); return false; }
+    if (this.review) { this.flash('复盘模式中，先退出复盘'); return false; }
     const color = this.turn;
     this.history.push({
       board: this.board.map(row => row.slice()), turn: color,
@@ -421,10 +478,12 @@ class GoScene extends Phaser.Scene {
     sfx.pass();
     this.flash((color === BLACK ? '黑' : '白') + '方停一手');
     this.afterMove();
+    return true;
   }
 
   afterMove() {
-    if (this.passes >= 2) { this.showScore(); return; }   // 双方连续停一手 → 终局
+    if (this.importing) return;                        // 导入时由导入流程统一收尾
+    if (this.passes >= 2) { this.showScore(); return; }// 双方连续停一手 → 终局
     if (this.mode !== 'pvp' && !this.gameOver && this.turn === this.aiColor()) {
       this.busy = true; this.refresh();
       this.time.delayedCall(380, () => { this.busy = false; this.aiMove(); });
@@ -433,6 +492,7 @@ class GoScene extends Phaser.Scene {
 
   // 人机模式且电脑该走时（新对局/切换模式后）先让电脑落子
   maybeAiFirst() {
+    if (this.importing) return;
     if (this.mode !== 'pvp' && !this.gameOver && this.turn === this.aiColor()) {
       this.busy = true; this.refresh();
       this.time.delayedCall(450, () => { this.busy = false; this.aiMove(); });
@@ -798,20 +858,23 @@ class GoScene extends Phaser.Scene {
     document.getElementById('btnLast').disabled  = !r || this.step >= total;
   }
 
+  /* ---------- 棋谱导入 / 导出（SGF） ---------- */
+  buildSgf() {
+    const re = this.scoreResult ? this.scoreResult.winner + '胜' : '?';
+    const head = `(;GM[1]FF[4]CA[UTF-8]AP[PhaserWeiqi:1.0]SZ[${this.n}]KM[7.5]` +
+                 `PB[黑方]PW[白方]RE[${re}]`;
+    const body = this.moves.map(mv => {
+      const tag = mv.pass ? '[]' : `[${sgfCharFromIdx(mv.c)}${sgfCharFromIdx(mv.r)}]`;
+      return `;${mv.color === BLACK ? 'B' : 'W'}${tag}` +
+             (mv.captured.length ? `C[提${mv.captured.length}子]` : '');
+    }).join('');
+    return head + body + ')\n';
+  }
+
+  // 复制到剪贴板
   exportRecord() {
     if (!this.moves.length) { sfx.deny(); return this.flash('还没有落子可导出'); }
-    const lines = [
-      `(; GM[1] FF[4] SZ[${this.n}]`,
-      `KM[7.5] PB[黑方] PW[白方] RE[${this.gameOver && this.scoreResult ? this.scoreResult.winner + '胜' : '?'}]`
-    ];
-    for (let i = 0; i < this.moves.length; i++) {
-      const mv = this.moves[i];
-      const col = mv.pass ? '' : COLS[mv.c];
-      const tag = mv.pass ? '[]' : `[${col}${String.fromCharCode(97 + mv.r)}]`;
-      lines.push(`;${mv.color === BLACK ? 'B' : 'W'}${tag}` + (mv.captured.length ? `C[提${mv.captured.length}子]` : ''));
-    }
-    lines.push(')');
-    const text = lines.join('\n');
+    const text = this.buildSgf();
     const done = () => this.flash('棋谱已复制到剪贴板（SGF 格式）');
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done).catch(() => this.fallbackCopy(text, done));
@@ -825,6 +888,80 @@ class GoScene extends Phaser.Scene {
     document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); cb(); } catch (e) { this.flash('复制失败，请手动选择'); }
     document.body.removeChild(ta);
+  }
+
+  // 下载 .sgf 文件
+  exportFile() {
+    if (!this.moves.length) { sfx.deny(); return this.flash('还没有落子可导出'); }
+    const text = this.buildSgf();
+    const blob = new Blob([text], { type: 'application/x-go-sgf;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    a.href = url;
+    a.download = `weiqi_${this.n}lu_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_` +
+                 `${p(d.getHours())}${p(d.getMinutes())}.sgf`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    this.flash('已导出 .sgf 文件');
+  }
+
+  // 从 SGF 文本导入：按规则引擎逐手重放，遇禁着即停
+  importSgf(text) {
+    const data = parseSgf(text);
+    if (!data || !data.moves.length) { sfx.deny(); return this.flash('未解析到棋谱，请检查是否为有效 .sgf 文件'); }
+
+    this.exitReview(true);
+    if (data.size !== this.n) {                       // 棋谱指定了别的棋盘大小
+      document.getElementById('selSize').value = String(data.size);
+      this.rebuildForSize(data.size);
+    } else {
+      this.mode = document.getElementById('selMode').value;
+      this.newGame();
+    }
+
+    this.importing = true;                            // 静音 + 不触发 AI + 不逐手重绘
+    for (const s of data.setup) {                     // 让子
+      if (this.board[s.r][s.c] === EMPTY) {
+        this.board[s.r][s.c] = s.color;
+        this.captured[s.color] += 0;
+      }
+    }
+    if (data.moves.length) this.turn = data.moves[0].color;
+
+    let played = 0, bad = -1;
+    for (let i = 0; i < data.moves.length; i++) {
+      const mv = data.moves[i];
+      if (this.turn !== mv.color) this.turn = mv.color;   // 容忍让子等非黑先手
+      const ok = mv.pass ? this.doPass() : this.placeStone(mv.r, mv.c);
+      if (!ok) { bad = i + 1; break; }
+      played++;
+    }
+    this.importing = false;
+
+    this.redrawStones();
+    this.drawMarker();
+    this.refresh();
+    this.renderRecord();
+    if (bad > 0) this.flash(`导入中断：第 ${bad} 手不合规则，已载入前 ${played} 手`);
+    else this.flash(`已导入 ${played} 手（${data.size} 路棋盘）`);
+    if (bad < 0 && this.passes >= 2) this.showScore();   // 棋谱以连续两手结束 → 终局
+  }
+
+  // 导入专用的停一手（复用 pass 但不弹提示）
+  doPass() {
+    const color = this.turn;
+    this.history.push({
+      board: this.board.map(row => row.slice()), turn: color,
+      captured: { ...this.captured }, lastMove: this.lastMove, passes: this.passes, key: null
+    });
+    this.moves.push({ color, r: -1, c: -1, pass: true, captured: [] });
+    this.passes++;
+    this.lastMove = null;
+    this.turn = other(color);
+    return true;
   }
 
   /* ---------- 界面 ---------- */
@@ -904,6 +1041,41 @@ $('btnScore').addEventListener('click', () => window.__scene && window.__scene.s
 $('btnCoords').addEventListener('click', () => window.__scene && window.__scene.toggleCoords());
 $('btnTerritory').addEventListener('click', () => window.__scene && window.__scene.toggleTerritory());
 $('btnExport').addEventListener('click', () => window.__scene && window.__scene.exportRecord());
+$('btnExportFile').addEventListener('click', () => window.__scene && window.__scene.exportFile());
+$('btnImport').addEventListener('click', () => $('fileInput').click());
+
+// 选择文件导入
+$('fileInput').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';                       // 允许重复导入同一文件
+  if (f) readSgfFile(f);
+});
+
+// 拖拽 .sgf 到棋盘导入
+const gameBox = $('game');
+['dragenter', 'dragover'].forEach(ev => gameBox.addEventListener(ev, e => {
+  e.preventDefault(); e.stopPropagation();
+  gameBox.style.boxShadow = '0 0 0 3px var(--accent), 0 18px 40px rgba(0,0,0,.6)';
+}));
+['dragleave', 'drop'].forEach(ev => gameBox.addEventListener(ev, e => {
+  e.preventDefault(); e.stopPropagation();
+  gameBox.style.boxShadow = '';
+}));
+gameBox.addEventListener('drop', e => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) readSgfFile(f);
+});
+
+function readSgfFile(file) {
+  if (file.size > 4 * 1024 * 1024) { sfx.deny(); return window.__scene && window.__scene.flash('文件过大'); }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const s = window.__scene;
+    if (s) s.importSgf(String(reader.result || ''));
+  };
+  reader.onerror = () => window.__scene && window.__scene.flash('文件读取失败');
+  reader.readAsText(file, 'utf-8');
+}
 
 $('btnReview').addEventListener('click', () => {
   const s = window.__scene; if (!s) return;
