@@ -75,6 +75,7 @@
   <div class="row">
     <button id="btnCoords">隐藏坐标</button>
     <button id="btnTerritory">显示领地</button>
+    <button id="btnSound">🔊 音效开</button>
   </div>
 
   <details>
@@ -92,7 +93,10 @@
 const EMPTY = 0, BLACK = 1, WHITE = 2;
 const other = c => (c === BLACK ? WHITE : BLACK);
 const COLS = 'ABCDEFGHJKLMNOPQRST';   // 列标按惯例跳过 I
-const GAME_SIZE = 616;                // 画布固定边长，小棋盘自动居中
+const GAME_SIZE = 640;                // 画布边长
+const CELL = 30;                      // 格距
+const FRAME_PAD = 11;                 // 木框到最外一条网格线的距离
+const LABEL_PAD = 27;                 // 坐标号中心到最外一条网格线的距离
 let boardSize = 19;
 
 function starPoints(n) {
@@ -102,6 +106,104 @@ function starPoints(n) {
   return pts;
 }
 
+/* ================= 音效：WebAudio 实时合成，无需音频文件 ================= */
+class Sfx {
+  constructor() {
+    this.ctx = null; this.master = null; this.enabled = true;
+    try { this.enabled = localStorage.getItem('weiqi_sound') !== 'off'; } catch (e) {}
+  }
+  // 懒加载：优先复用 Phaser 的 AudioContext
+  ensure() {
+    if (this.ctx) return this.ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    let ctx = null;
+    try { ctx = (window.__scene && window.__scene.sound && window.__scene.sound.context) || null; } catch (e) {}
+    if (!ctx || !ctx.createBufferSource) { try { ctx = new AC(); } catch (e) { return null; } }
+    this.ctx = ctx;
+    this.master = ctx.createGain();
+    this.master.gain.value = this.enabled ? 0.7 : 0;
+    this.master.connect(ctx.destination);
+    return ctx;
+  }
+  resume() { const c = this.ensure(); if (c && c.state === 'suspended') c.resume().catch(() => {}); }
+  setEnabled(v) {
+    this.enabled = v;
+    try { localStorage.setItem('weiqi_sound', v ? 'on' : 'off'); } catch (e) {}
+    if (this.master) this.master.gain.value = v ? 0.7 : 0;
+  }
+  /* 单个乐音：可滑音、可延迟 */
+  blip(freq, opts) {
+    try {
+      const ctx = this.ensure(); if (!ctx) return;
+      const o = opts || {};
+      const type = o.type || 'sine', dur = o.dur || 0.12, gain = o.gain || 0.25;
+      const delay = o.delay || 0, t0 = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+      if (o.glideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.glideTo), t0 + dur);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(gain, t0 + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      osc.connect(g); g.connect(this.master);
+      osc.start(t0); osc.stop(t0 + dur + 0.03);
+    } catch (e) {}
+  }
+  /* 带通噪声：木头敲击的“咔”声 */
+  noise(opts) {
+    try {
+      const ctx = this.ensure(); if (!ctx) return;
+      const o = opts || {};
+      const dur = o.dur || 0.05, gain = o.gain || 0.4, freq = o.freq || 1800, delay = o.delay || 0;
+      const t0 = ctx.currentTime + delay;
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 0.9;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(gain, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      src.connect(f); f.connect(g); g.connect(this.master);
+      src.start(t0);
+    } catch (e) {}
+  }
+  /* 落子：木质感敲击 */
+  stone() {
+    const d = 0.93 + Math.random() * 0.14;
+    this.noise({ dur: 0.045, gain: 0.5, freq: 2100 * d });
+    this.blip(300 * d, { type: 'sine', dur: 0.09, gain: 0.3, glideTo: 105 * d });
+  }
+  /* 提子：连声 + 清音提示 */
+  capture(n) {
+    this.stone();
+    for (let i = 0; i < Math.min(n, 4); i++) this.noise({ dur: 0.05, gain: 0.26, freq: 2600, delay: 0.07 + i * 0.05 });
+    this.blip(880, { type: 'triangle', dur: 0.18, gain: 0.13, delay: 0.06 });
+  }
+  /* 禁着：低沉否定音 */
+  deny() { this.blip(120, { type: 'square', dur: 0.17, gain: 0.14, glideTo: 78 }); }
+  /* 停一手：气声 */
+  pass() { this.blip(520, { type: 'sine', dur: 0.22, gain: 0.11, glideTo: 360 }); }
+  /* 悔棋：下行回退 */
+  undo() {
+    this.blip(430, { type: 'triangle', dur: 0.12, gain: 0.13, glideTo: 190 });
+    this.blip(300, { type: 'triangle', dur: 0.11, gain: 0.1, glideTo: 140, delay: 0.08 });
+  }
+  /* 终局：上行琶音 */
+  finish() { [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
+    this.blip(f, { type: 'triangle', dur: 0.3, gain: 0.15, delay: i * 0.11 })); }
+  /* 新对局：两声轻提示 */
+  start() {
+    this.blip(392, { type: 'sine', dur: 0.18, gain: 0.13 });
+    this.blip(587.33, { type: 'sine', dur: 0.22, gain: 0.11, delay: 0.1 });
+  }
+}
+const sfx = new Sfx();
+window.addEventListener('pointerdown', () => sfx.resume());   // 满足浏览器自动播放策略
+
 /* ================= 场景：舞台 + 导演 ================= */
 class GoScene extends Phaser.Scene {
   constructor() { super('GoScene'); }
@@ -110,7 +212,7 @@ class GoScene extends Phaser.Scene {
 
   create() {
     const n = this.n;
-    this.cell = 30;
+    this.cell = CELL;
     this.margin = (GAME_SIZE - (n - 1) * this.cell) / 2;   // 小棋盘居中偏移
     this.radius = this.cell * 0.45;
     this.mode = document.getElementById('selMode').value;
@@ -119,7 +221,7 @@ class GoScene extends Phaser.Scene {
     this.scoreResult = null;
     this.busy = false;
 
-    // 图层顺序：棋盘 → 领地标记 → 棋子 → 最后一手标记 → 悬停预览
+    // 图层顺序：棋盘 → 领地标记 → 棋子 → 最后一手标记 → 悬停预览 → 坐标号
     this.boardGfx = this.add.graphics();
     this.territoryGfx = this.add.graphics();
     this.stoneLayer = this.add.container(0, 0);
@@ -216,8 +318,8 @@ class GoScene extends Phaser.Scene {
     if (this.gameOver) return this.flash('对局已结束，请开始新对局');
     const color = this.turn;
     const sim = this.simulate(r, c, color);
-    if (!sim) return this.flash('禁着点：这里落子会自杀');
-    if (sim.ko) return this.flash('打劫禁着：不能立刻提回');
+    if (!sim) { sfx.deny(); return this.flash('禁着点：这里落子会自杀'); }
+    if (sim.ko) { sfx.deny(); return this.flash('打劫禁着：不能立刻提回'); }
 
     const prevBoard = this.board.map(row => row.slice());
     this.board[r][c] = color;
@@ -237,6 +339,8 @@ class GoScene extends Phaser.Scene {
     for (const [cr, cc] of sim.stones) this.removeStone(cr, cc);
     this.turn = other(color);
 
+    if (sim.stones.length) sfx.capture(sim.stones.length); else sfx.stone();
+
     this.drawMarker();
     this.hideHover();
     this.refresh();
@@ -255,6 +359,7 @@ class GoScene extends Phaser.Scene {
     this.turn = other(color);
     this.drawMarker();
     this.refresh();
+    sfx.pass();
     this.flash((color === BLACK ? '黑' : '白') + '方停一手');
     this.afterMove();
   }
@@ -268,7 +373,7 @@ class GoScene extends Phaser.Scene {
   }
 
   undo() {
-    if (!this.history.length) return this.flash('没有可悔的棋');
+    if (!this.history.length) { sfx.deny(); return this.flash('没有可悔的棋'); }
     const target = this.mode === 'pvp' ? null : this.humanColor();
     this.undoOnce();
     while (target && this.history.length && this.turn !== target) this.undoOnce();
@@ -281,6 +386,7 @@ class GoScene extends Phaser.Scene {
     this.redrawStones();
     this.drawMarker();
     this.refresh();
+    sfx.undo();
     this.flash('已悔棋');
     // 悔棋后若轮到电脑，让它继续走
     if (this.mode !== 'pvp' && !this.gameOver && this.turn === this.aiColor()) {
@@ -343,6 +449,7 @@ class GoScene extends Phaser.Scene {
     this.gameOver = true;
     this.busy = false;
     this.hideHover();
+    sfx.finish();
     this.flash(`数地：黑 ${res.blackTotal} 子 / 白 ${res.whiteTotal} 子 → ${res.winner}胜 ${res.margin.toFixed(2)} 子`);
     this.refresh(res);
   }
@@ -412,17 +519,30 @@ class GoScene extends Phaser.Scene {
   }
 
   drawBoard() {
-    const g = this.boardGfx, n = this.n, m = this.margin, c = this.cell;
+    const g = this.boardGfx, n = this.n, m = this.margin, c = this.cell, f = FRAME_PAD;
+    const x0 = m - f, y0 = m - f, size = (n - 1) * c + f * 2;   // 木框矩形
     g.clear();
-    g.fillStyle(0xe8c17a, 1);
-    g.fillRoundedRect(0, 0, GAME_SIZE, GAME_SIZE, 10);
-    g.lineStyle(2, 0x8a5a22, 1);
-    g.strokeRoundedRect(m - c * 0.75, m - c * 0.75, (n - 1) * c + c * 1.5, (n - 1) * c + c * 1.5, 4);
-    g.lineStyle(1, 0x6b4a1f, 1);
+
+    // 桌面
+    g.fillStyle(0x1b1410, 1);
+    g.fillRect(0, 0, GAME_SIZE, GAME_SIZE);
+
+    // 木框 + 棋盘底板（外深内浅双描边）
+    g.fillStyle(0xe2b978, 1);
+    g.fillRoundedRect(x0, y0, size, size, 8);
+    g.lineStyle(3, 0x6b4a1f, 1);
+    g.strokeRoundedRect(x0, y0, size, size, 8);
+    g.lineStyle(1, 0xf2dcb0, 0.5);
+    g.strokeRoundedRect(x0 + 3, y0 + 3, size - 6, size - 6, 6);
+
+    // 网格线：从第一条到最外一条，完整闭合
+    g.lineStyle(1, 0x5a3d17, 1);
     for (let i = 0; i < n; i++) {
-      g.lineBetween(m, m + i * c, m + (n - 1) * c, m + i * c);
-      g.lineBetween(m + i * c, m, m + i * c, m + (n - 1) * c);
+      g.lineBetween(m, m + i * c, m + (n - 1) * c, m + i * c);   // 横线
+      g.lineBetween(m + i * c, m, m + i * c, m + (n - 1) * c);   // 纵线
     }
+
+    // 星位
     g.fillStyle(0x3a2410, 1);
     for (const [r, cc] of starPoints(n)) g.fillCircle(m + cc * c, m + r * c, c * 0.11);
   }
@@ -430,14 +550,15 @@ class GoScene extends Phaser.Scene {
   createLabels() {
     if (this.coordTexts) this.coordTexts.forEach(t => t.destroy());
     this.coordTexts = [];
-    const n = this.n, m = this.margin, c = this.cell;
-    const st = { fontFamily: 'system-ui', fontSize: Math.max(10, Math.round(c * 0.34)) + 'px', color: '#7a5a2a' };
+    const n = this.n, m = this.margin, c = this.cell, L = LABEL_PAD;
+    const st = { fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: '12px', color: '#c9a877' };
     for (let i = 0; i < n; i++) {
+      const colLabel = COLS[i], rowLabel = String(n - i);
       this.coordTexts.push(
-        this.add.text(m + i * c, m - c * 0.62, COLS[i], st).setOrigin(0.5),
-        this.add.text(m + i * c, m + (n - 1) * c + c * 0.32, COLS[i], st).setOrigin(0.5),
-        this.add.text(m - c * 0.62, m + i * c, String(n - i), st).setOrigin(0.5),
-        this.add.text(m + (n - 1) * c + c * 0.62, m + i * c, String(n - i), st).setOrigin(0.5)
+        this.add.text(m + i * c, m - L, colLabel, st).setOrigin(0.5),                    // 上
+        this.add.text(m + i * c, m + (n - 1) * c + L, colLabel, st).setOrigin(0.5),      // 下
+        this.add.text(m - L, m + i * c, rowLabel, st).setOrigin(0.5),                    // 左
+        this.add.text(m + (n - 1) * c + L, m + i * c, rowLabel, st).setOrigin(0.5)       // 右
       );
     }
     this.coordTexts.forEach(t => t.setVisible(this.showCoords));
@@ -554,6 +675,7 @@ class GoScene extends Phaser.Scene {
     const size = parseInt(document.getElementById('selSize').value, 10);
     if (size !== this.n) { boardSize = size; this.scene.restart({ size }); }
     else { this.mode = document.getElementById('selMode').value; this.newGame(); }
+    sfx.start();
     this.flash(`新对局：${size} 路棋盘`);
   }
 }
@@ -564,7 +686,7 @@ new Phaser.Game({
   width: GAME_SIZE,
   height: GAME_SIZE,
   parent: 'game',
-  backgroundColor: '#241c14',
+  backgroundColor: '#1b1410',
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_HORIZONTALLY },
   scene: [GoScene]
 });
@@ -577,6 +699,15 @@ $('btnPass').addEventListener('click', () => window.__scene && window.__scene.pa
 $('btnScore').addEventListener('click', () => window.__scene && window.__scene.showScore());
 $('btnCoords').addEventListener('click', () => window.__scene && window.__scene.toggleCoords());
 $('btnTerritory').addEventListener('click', () => window.__scene && window.__scene.toggleTerritory());
+
+const btnSound = $('btnSound');
+btnSound.textContent = sfx.enabled ? '🔊 音效开' : '🔇 音效关';
+btnSound.addEventListener('click', () => {
+  sfx.setEnabled(!sfx.enabled);
+  btnSound.textContent = sfx.enabled ? '🔊 音效开' : '🔇 音效关';
+  if (sfx.enabled) { sfx.resume(); sfx.blip(660, { type: 'sine', dur: 0.12, gain: 0.16 }); }
+});
+
 $('selSize').addEventListener('change', () => window.__scene && window.__scene.startNewGame());
 $('selMode').addEventListener('change', () => window.__scene && window.__scene.startNewGame());
 
