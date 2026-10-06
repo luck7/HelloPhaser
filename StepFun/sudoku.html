@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数独游戏</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    color: #fff;
+    padding: 16px;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 12px; letter-spacing: 4px; }
+  #game {
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    max-width: 100%;
+    line-height: 0;
+  }
+  .tip { margin-top: 12px; font-size: 12px; opacity: .75; text-align: center; line-height: 1.7; }
+</style>
+</head>
+<body>
+<h1>数 独</h1>
+<div id="game"></div>
+<div class="tip">键盘：1-9 填数 · Delete 清除 · 方向键移动 · P 铅笔模式 · H 提示</div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
+/* =========================================================
+ * 第一部分：数独核心逻辑（纯函数，不依赖 Phaser）
+ * =======================================================*/
+const FONT = '"PingFang SC","Microsoft YaHei","Noto Sans SC",Arial,sans-serif';
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function isValid(grid, r, c, n) {
+  for (let i = 0; i < 9; i++) {
+    if (grid[r * 9 + i] === n) return false;
+    if (grid[i * 9 + c] === n) return false;
+  }
+  const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++)
+      if (grid[(br + i) * 9 + bc + j] === n) return false;
+  return true;
+}
+
+function fillGrid(grid) {
+  const i = grid.indexOf(0);
+  if (i === -1) return true;
+  const r = Math.floor(i / 9), c = i % 9;
+  for (const n of shuffle([1,2,3,4,5,6,7,8,9])) {
+    if (isValid(grid, r, c, n)) {
+      grid[i] = n;
+      if (fillGrid(grid)) return true;
+      grid[i] = 0;
+    }
+  }
+  return false;
+}
+
+function countSolutions(grid, limit) {
+  const g = grid.slice();
+  let count = 0;
+  (function solve() {
+    let best = -1, bestCands = null;
+    for (let i = 0; i < 81; i++) {
+      if (g[i] === 0) {
+        const r = Math.floor(i / 9), c = i % 9;
+        const cands = [];
+        for (let n = 1; n <= 9; n++) if (isValid(g, r, c, n)) cands.push(n);
+        if (cands.length === 0) return;
+        if (!bestCands || cands.length < bestCands.length) {
+          best = i; bestCands = cands;
+          if (cands.length === 1) break;
+        }
+      }
+    }
+    if (best === -1) { count++; return; }
+    const r = Math.floor(best / 9), c = best % 9;
+    for (const n of bestCands) {
+      g[best] = n;
+      solve();
+      g[best] = 0;
+      if (count >= limit) return;
+    }
+  })();
+  return count;
+}
+
+function solveOne(grid) {
+  const g = grid.slice();
+  (function solve() {
+    let best = -1, bestCands = null;
+    for (let i = 0; i < 81; i++) {
+      if (g[i] === 0) {
+        const r = Math.floor(i / 9), c = i % 9;
+        const cands = [];
+        for (let n = 1; n <= 9; n++) if (isValid(g, r, c, n)) cands.push(n);
+        if (cands.length === 0) return;
+        if (!bestCands || cands.length < bestCands.length) {
+          best = i; bestCands = cands;
+          if (cands.length === 1) break;
+        }
+      }
+    }
+    if (best === -1) return true;
+    const r = Math.floor(best / 9), c = best % 9;
+    for (const n of bestCands) {
+      g[best] = n;
+      if (solve()) return true;
+      g[best] = 0;
+    }
+    return false;
+  })();
+  return g;
+}
+
+function generatePuzzle(holes) {
+  const solution = new Array(81).fill(0);
+  fillGrid(solution);
+  const puzzle = solution.slice();
+  let removed = 0;
+  for (const i of shuffle([...Array(81).keys()])) {
+    if (removed >= holes) break;
+    const backup = puzzle[i];
+    puzzle[i] = 0;
+    if (countSolutions(puzzle, 2) !== 1) puzzle[i] = backup;
+    else removed++;
+  }
+  return { solution, puzzle };
+}
+
+function computeCandidates(grid, i) {
+  if (grid[i] !== 0) return [];
+  const r = Math.floor(i / 9), c = i % 9;
+  const res = [];
+  for (let n = 1; n <= 9; n++) if (isValid(grid, r, c, n)) res.push(n);
+  return res;
+}
+
+/* =========================================================
+ * 第二部分：Phaser 场景
+ * =======================================================*/
+const CELL = 56, BOARD = CELL * 9, BX = 30, BY = 30;
+const GAME_W = 880, GAME_H = 660;
+const PANEL_X = 700;                 // 右侧操作面板中心（棋盘右缘为 534，不再重叠）
+const KEYPAD_Y = 590;                // 底部数字键盘
+const DIFFS = { easy: { holes: 40, name: '简单' }, medium: { holes: 48, name: '中等' }, hard: { holes: 54, name: '困难' } };
+
+class SudokuScene extends Phaser.Scene {
+  constructor() { super('Sudoku'); }
+
+  create() {
+    this.difficulty = 'medium';
+    this.solution = null;
+    this.values = null;
+    this.source = null;             // 0空 1题目固定 2用户 3提示
+    this.candidates = [];
+    this.selected = -1;
+    this.pencilMode = false;
+    this.customEditing = false;
+    this.showErrors = false;
+    this.hints = 0;
+    this.completed = false;
+    this.startTime = 0;
+    this.elapsed = 0;
+
+    this.bg = this.add.graphics();
+
+    // 主数字文本（每个格子 1 个）
+    this.cellTexts = [];
+    for (let i = 0; i < 81; i++) {
+      const r = Math.floor(i / 9), c = i % 9;
+      const t = this.add.text(BX + c * CELL + CELL / 2, BY + r * CELL + CELL / 2, '',
+        { fontFamily: FONT, fontSize: '32px', fontStyle: 'bold', color: '#1a1a1a', resolution: 2 }).setOrigin(0.5);
+      this.cellTexts.push(t);
+    }
+
+    // 候选数文本（每个格子 3x3 = 9 个位置，均匀分布）
+    this.candTexts = [];
+    for (let i = 0; i < 81; i++) {
+      const r = Math.floor(i / 9), c = i % 9;
+      const row = [];
+      for (let n = 1; n <= 9; n++) {
+        const ox = ((n - 1) % 3 - 1) * (CELL / 3);
+        const oy = (Math.floor((n - 1) / 3) - 1) * (CELL / 3);
+        const t = this.add.text(BX + c * CELL + CELL / 2 + ox, BY + r * CELL + CELL / 2 + oy, '',
+          { fontFamily: FONT, fontSize: '14px', color: '#5a6b7d', resolution: 2 }).setOrigin(0.5);
+        row.push(t);
+      }
+      this.candTexts.push(row);
+    }
+
+    this.buildUI();
+
+    // 棋盘点击选区
+    this.add.rectangle(BX, BY, BOARD, BOARD).setOrigin(0).setInteractive()
+      .on('pointerdown', (p) => {
+        const c = Math.floor((p.x - BX) / CELL), r = Math.floor((p.y - BY) / CELL);
+        if (c >= 0 && c < 9 && r >= 0 && r < 9) { this.selected = r * 9 + c; this.redraw(); }
+      });
+
+    this.input.keyboard.on('keydown', this.onKey, this);
+    this.newGame('medium');
+  }
+
+  // ---------- UI ----------
+  buildUI() {
+    this.add.text(PANEL_X, 26, '数  独', { fontFamily: FONT, fontSize: '28px', fontStyle: 'bold', color: '#ffffff', resolution: 2 }).setOrigin(0.5, 0);
+    this.add.text(PANEL_X, 66, 'SUDOKU', { fontFamily: FONT, fontSize: '14px', color: '#9fb6d8', resolution: 2 }).setOrigin(0.5, 0);
+
+    this.add.text(PANEL_X, 96, '— 难度 —', { fontFamily: FONT, fontSize: '15px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
+    this.diffButtons = {};
+    ['easy', 'medium', 'hard'].forEach((d, i) => {
+      this.diffButtons[d] = this.makeButton(PANEL_X, 132 + i * 38, 200, 32, DIFFS[d].name, 0x2f4a75, () => this.newGame(d));
+    });
+
+    this.add.text(PANEL_X, 248, '— 功能 —', { fontFamily: FONT, fontSize: '15px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
+    this.btnNew      = this.makeButton(PANEL_X, 284, 200, 32, '↻  重新出题',   0x3a6ea5, () => this.newGame(this.difficulty));
+    this.btnHint     = this.makeButton(PANEL_X, 322, 200, 32, '💡  提  示',      0x3a6ea5, () => this.giveHint());
+    this.btnPencil   = this.makeButton(PANEL_X, 360, 200, 32, '✏  铅笔模式',    0x3a6ea5, () => this.togglePencil());
+    this.btnAutoCand = this.makeButton(PANEL_X, 398, 200, 32, '🔢  自动可能项', 0x3a6ea5, () => this.autoCandidates());
+    this.btnCheck    = this.makeButton(PANEL_X, 436, 200, 32, '✔  检查错误',    0x3a6ea5, () => this.toggleErrors());
+    this.btnClear    = this.makeButton(PANEL_X, 474, 200, 32, '⌫  清除本格',    0x3a6ea5, () => this.clearCell());
+    this.btnCustom   = this.makeButton(PANEL_X, 522, 200, 34, '✎  自定义题目',  0x8a5a2b, () => this.customButton());
+
+    this.msg = this.add.text(PANEL_X, 566, '',
+      { fontFamily: FONT, fontSize: '14px', color: '#ffe9a8', wordWrap: { width: 210 }, align: 'center', lineSpacing: 5, resolution: 2 }).setOrigin(0.5, 0);
+    this.stats = this.add.text(PANEL_X, 626, '',
+      { fontFamily: FONT, fontSize: '14px', color: '#c3d4ea', align: 'center', lineSpacing: 5, resolution: 2 }).setOrigin(0.5, 0);
+
+    // 底部数字键盘
+    this.add.text(BX + BOARD / 2, 556, '数 字 键 盘', { fontFamily: FONT, fontSize: '14px', color: '#a9bdd6', resolution: 2 }).setOrigin(0.5);
+    for (let n = 1; n <= 9; n++) {
+      this.makeButton(BX + (n - 1) * (CELL + 0.4) + CELL / 2, KEYPAD_Y, 52, 44, String(n), 0x40567c, () => this.inputNumber(n));
+    }
+    this.updateLabels();
+  }
+
+  // 按钮工厂：fill 是可变状态，保证“选中态”不会因鼠标移出而丢失
+  makeButton(x, y, w, h, label, fill, cb) {
+    const c = this.add.container(x, y);
+    const g = this.add.graphics();
+    const t = this.add.text(0, 0, label, { fontFamily: FONT, fontSize: '16px', color: '#ffffff', resolution: 2 }).setOrigin(0.5);
+    c.add([g, t]);
+    const btn = { container: c, text: t, fill: fill };
+    btn.draw = () => {
+      g.clear();
+      g.fillStyle(btn.fill, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 8);
+      g.lineStyle(1, 0xffffff, 0.22).strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
+    };
+    btn.setFill = (f) => { btn.fill = f; btn.draw(); };
+    btn.draw();
+    c.setSize(w, h).setInteractive({ useHandCursor: true });
+    c.on('pointerover', () => {
+      g.clear();
+      g.fillStyle(Phaser.Display.Color.ValueToColor(btn.fill).lighten(16).color, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 8);
+      g.lineStyle(1, 0xffffff, 0.3).strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
+    });
+    c.on('pointerout', btn.draw);   // 恢复当前状态色（而非初始色）
+    c.on('pointerup', cb);
+    return btn;
+  }
+
+  // ---------- 新游戏 ----------
+  newGame(diff) {
+    this.difficulty = diff;
+    this.customEditing = false;
+    this.showErrors = false;
+    this.selected = -1;
+    const { solution, puzzle } = generatePuzzle(DIFFS[diff].holes);
+    this.solution = solution;
+    this.values = puzzle.slice();
+    this.source = puzzle.map(v => v ? 1 : 0);
+    this.candidates = Array.from({ length: 81 }, () => new Set());
+    this.hints = 0;
+    this.completed = false;
+    this.startTime = this.time.now;
+    this.elapsed = 0;
+    this.setMessage(`${DIFFS[diff].name}难度 · 已生成唯一解题目，加油！`);
+    this.updateLabels();
+    this.redraw();
+  }
+
+  // ---------- 输入 ----------
+  inputNumber(n) {
+    if (this.completed) return;
+    if (this.customEditing) {
+      if (this.selected >= 0) this.values[this.selected] = (this.values[this.selected] === n ? 0 : n);
+      this.redraw();
+      return;
+    }
+    const i = this.selected;
+    if (i < 0 || this.source[i] === 1) return;
+    if (this.pencilMode) {
+      const s = this.candidates[i];
+      s.has(n) ? s.delete(n) : s.add(n);
+    } else {
+      this.values[i] = n;
+      this.source[i] = 2;
+      this.candidates[i].clear();
+    }
+    this.checkComplete();
+    this.redraw();
+  }
+
+  clearCell() {
+    const i = this.selected;
+    if (i < 0) return;
+    if (this.customEditing) { this.values[i] = 0; this.redraw(); return; }
+    if (this.source[i] === 1) return;
+    this.values[i] = 0;
+    this.source[i] = 0;
+    this.candidates[i].clear();
+    this.redraw();
+  }
+
+  // ---------- 提示 ----------
+  giveHint() {
+    if (this.completed || this.customEditing) return;
+    const empties = [];
+    for (let i = 0; i < 81; i++) if (this.values[i] !== this.solution[i]) empties.push(i);
+    if (!empties.length) { this.setMessage('所有格子都已正确！'); return; }
+    const i = empties[Math.floor(Math.random() * empties.length)];
+    this.values[i] = this.solution[i];
+    this.source[i] = 3;
+    this.candidates[i].clear();
+    this.selected = i;
+    this.hints++;
+    this.checkComplete();
+    this.setMessage(`提示：第 ${Math.floor(i / 9) + 1} 行 第 ${i % 9 + 1} 列 = ${this.solution[i]}（已用 ${this.hints} 次）`);
+    this.redraw();
+  }
+
+  // ---------- 铅笔模式 ----------
+  togglePencil() {
+    this.pencilMode = !this.pencilMode;
+    this.setMessage(this.pencilMode ? '铅笔模式开启：输入的数字将标记为可能项' : '铅笔模式关闭：输入的数字将直接填入格子');
+    this.updateLabels();
+  }
+
+  // ---------- 自动可能项 ----------
+  autoCandidates() {
+    if (this.completed || this.customEditing) return;
+    let count = 0;
+    for (let i = 0; i < 81; i++) {
+      if (this.values[i] === 0) {
+        this.candidates[i] = new Set(computeCandidates(this.values, i));
+        count++;
+      }
+    }
+    this.setMessage(`已为 ${count} 个空格填充可能项（候选数）`);
+    this.redraw();
+  }
+
+  // ---------- 错误检查 ----------
+  toggleErrors() {
+    this.showErrors = !this.showErrors;
+    this.setMessage(this.showErrors ? '错误检查开启：填错的格子会标红' : '错误检查已关闭');
+    this.updateLabels();
+    this.redraw();
+  }
+
+  // ---------- 自定义题目 ----------
+  customButton() {
+    if (!this.customEditing) {
+      this.customEditing = true;
+      this.showErrors = false;
+      this.selected = -1;
+      this.values = new Array(81).fill(0);
+      this.candidates = Array.from({ length: 81 }, () => new Set());
+      this.setMessage('编辑模式：点击格子后用键盘或数字键盘摆题，完成后点"开始游戏"。至少需要 17 个给定数字。');
+      this.updateLabels();
+      this.redraw();
+    } else {
+      this.startCustomGame();
+    }
+  }
+
+  startCustomGame() {
+    const puzzle = this.values.slice();
+    const given = puzzle.filter(v => v !== 0).length;
+    if (given < 17) { this.setMessage(`给定数字只有 ${given} 个，至少需要 17 个。`); return; }
+    for (let i = 0; i < 81; i++) {
+      if (puzzle[i] === 0) continue;
+      const r = Math.floor(i / 9), c = i % 9;
+      for (let j = 0; j < 81; j++) {
+        if (j === i || puzzle[j] !== puzzle[i]) continue;
+        const r2 = Math.floor(j / 9), c2 = j % 9;
+        const sameBox = Math.floor(r / 3) === Math.floor(r2 / 3) && Math.floor(c / 3) === Math.floor(c2 / 3);
+        if (r === r2 || c === c2 || sameBox) { this.setMessage('给定数字存在同行/列/宫冲突，请修改。'); return; }
+      }
+    }
+    const cnt = countSolutions(puzzle, 2);
+    if (cnt === 0) { this.setMessage('该题目无解，请检查给定数字。'); return; }
+    this.solution = solveOne(puzzle);
+    this.values = puzzle.slice();
+    this.source = puzzle.map(v => v ? 1 : 0);
+    this.candidates = Array.from({ length: 81 }, () => new Set());
+    this.customEditing = false;
+    this.selected = -1;
+    this.hints = 0;
+    this.completed = false;
+    this.startTime = this.time.now;
+    this.elapsed = 0;
+    this.setMessage(cnt === 1 ? `自定义题目开始！解唯一（${given} 个给定数字）`
+                              : `注意：该题目有多个解，已选一个继续（${given} 个给定数字）`);
+    this.updateLabels();
+    this.redraw();
+  }
+
+  // ---------- 完成检测 ----------
+  checkComplete() {
+    for (let i = 0; i < 81; i++) if (this.values[i] !== this.solution[i]) return;
+    this.completed = true;
+    const mm = Math.floor(this.elapsed / 60000), ss = Math.floor((this.elapsed % 60000) / 1000);
+    this.setMessage(`🎉 恭喜完成！用时 ${mm} 分 ${ss} 秒，提示 ${this.hints} 次`);
+  }
+
+  // ---------- 绘制 ----------
+  redraw() {
+    const g = this.bg;
+    g.clear();
+    g.fillStyle(0xfdfdfd, 1).fillRect(BX, BY, BOARD, BOARD);
+
+    if (this.selected >= 0) {
+      const r = Math.floor(this.selected / 9), c = this.selected % 9;
+      g.fillStyle(0xeaf2fc, 1);
+      for (let i = 0; i < 9; i++) {
+        if (i !== c) g.fillRect(BX + i * CELL, BY + r * CELL, CELL, CELL);
+        if (i !== r) g.fillRect(BX + c * CELL, BY + i * CELL, CELL, CELL);
+      }
+      const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+      g.fillStyle(0xdbe8f7, 1);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        const rr = br + i, cc = bc + j;
+        if (rr !== r && cc !== c) g.fillRect(BX + cc * CELL, BY + rr * CELL, CELL, CELL);
+      }
+      if (this.values[this.selected]) {
+        g.fillStyle(0xd9f0d9, 1);
+        for (let i = 0; i < 81; i++)
+          if (i !== this.selected && this.values[i] === this.values[this.selected])
+            g.fillRect(BX + (i % 9) * CELL, BY + Math.floor(i / 9) * CELL, CELL, CELL);
+      }
+      g.fillStyle(0xbcd9ff, 1).fillRect(BX + c * CELL, BY + r * CELL, CELL, CELL);
+    }
+
+    g.fillStyle(0xeeeeee, 0.85);
+    for (let i = 0; i < 81; i++) if (this.source[i] === 1) g.fillRect(BX + (i % 9) * CELL, BY + Math.floor(i / 9) * CELL, CELL, CELL);
+
+    if (this.showErrors && !this.customEditing) {
+      g.fillStyle(0xffd2d2, 0.9);
+      for (let i = 0; i < 81; i++)
+        if (this.values[i] && this.values[i] !== this.solution[i])
+          g.fillRect(BX + (i % 9) * CELL, BY + Math.floor(i / 9) * CELL, CELL, CELL);
+    }
+
+    g.lineStyle(1, 0xc4ccd6, 1);
+    for (let i = 1; i < 9; i++) {
+      if (i % 3 === 0) continue;
+      g.beginPath(); g.moveTo(BX + i * CELL, BY); g.lineTo(BX + i * CELL, BY + BOARD); g.strokePath();
+      g.beginPath(); g.moveTo(BX, BY + i * CELL); g.lineTo(BX + BOARD, BY + i * CELL); g.strokePath();
+    }
+    g.lineStyle(3, 0x3c4a5e, 1);
+    for (const i of [3, 6]) {
+      g.beginPath(); g.moveTo(BX + i * CELL, BY); g.lineTo(BX + i * CELL, BY + BOARD); g.strokePath();
+      g.beginPath(); g.moveTo(BX, BY + i * CELL); g.lineTo(BX + BOARD, BY + i * CELL); g.strokePath();
+    }
+    g.strokeRect(BX, BY, BOARD, BOARD);
+
+    // 数字 + 3x3 均匀分布的候选数
+    for (let i = 0; i < 81; i++) {
+      const v = this.values[i];
+      const t = this.cellTexts[i], row = this.candTexts[i];
+      for (let n = 1; n <= 9; n++) row[n - 1].setText('').setVisible(false);
+      if (v) {
+        let color = '#1a1a1a';
+        if (this.source[i] === 2) color = '#0d47a1';
+        else if (this.source[i] === 3) color = '#1b7a2b';
+        if (this.showErrors && !this.customEditing && v !== this.solution[i]) color = '#c62828';
+        t.setText(String(v)).setColor(color).setVisible(true);
+      } else {
+        t.setVisible(false);
+        const s = this.candidates[i];
+        for (let n = 1; n <= 9; n++)
+          if (s.has(n)) row[n - 1].setText(String(n)).setVisible(true);
+      }
+    }
+    this.drawStats();
+  }
+
+  drawStats() {
+    const mm = Math.floor(this.elapsed / 60000), ss = Math.floor((this.elapsed % 60000) / 1000);
+    this.stats.setText([
+      `难度：${DIFFS[this.difficulty].name}    提示：${this.hints} 次`,
+      `用时：${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+    ]);
+  }
+
+  // ---------- 键盘 ----------
+  onKey(e) {
+    const k = e.key;
+    if (k >= '1' && k <= '9') { this.inputNumber(parseInt(k, 10)); e.preventDefault(); }
+    else if (k === 'Delete' || k === 'Backspace' || k === '0') { this.clearCell(); e.preventDefault(); }
+    else if (k === 'p' || k === 'P') this.togglePencil();
+    else if (k === 'h' || k === 'H') this.giveHint();
+    else if (k.startsWith('Arrow')) {
+      e.preventDefault();
+      if (this.selected < 0) this.selected = 40;
+      else {
+        let r = Math.floor(this.selected / 9), c = this.selected % 9;
+        if (k === 'ArrowUp') r = (r + 8) % 9;
+        if (k === 'ArrowDown') r = (r + 1) % 9;
+        if (k === 'ArrowLeft') c = (c + 8) % 9;
+        if (k === 'ArrowRight') c = (c + 1) % 9;
+        this.selected = r * 9 + c;
+      }
+      this.redraw();
+    }
+  }
+
+  setMessage(s) { this.msg.setText(s); }
+
+  // ---------- 按钮状态 ----------
+  updateLabels() {
+    this.btnPencil.text.setText(this.pencilMode ? '✏  铅笔模式：开' : '✏  铅笔模式');
+    this.btnPencil.setFill(this.pencilMode ? 0x2e7d32 : 0x3a6ea5);
+
+    this.btnCheck.text.setText(this.showErrors ? '✔  检查错误：开' : '✔  检查错误');
+    this.btnCheck.setFill(this.showErrors ? 0x8a2b2b : 0x3a6ea5);
+
+    this.btnCustom.text.setText(this.customEditing ? '▶  开始游戏' : '✎  自定义题目');
+    this.btnCustom.setFill(this.customEditing ? 0x2e7d32 : 0x8a5a2b);
+
+    for (const d in this.diffButtons) {
+      const on = (d === this.difficulty) && !this.customEditing;
+      this.diffButtons[d].setFill(on ? 0x1f8a4c : 0x2f4a75);
+    }
+  }
+
+  update() {
+    if (!this.completed && !this.customEditing && this.startTime) {
+      this.elapsed = this.time.now - this.startTime;
+      this.drawStats();
+    }
+  }
+}
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: GAME_W,
+  height: GAME_H,
+  parent: 'game',
+  backgroundColor: '#23324a',
+  render: { antialias: true, powerPreference: 'high-performance' },
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_HORIZONTALLY },
+  scene: SudokuScene
+});
+</script>
+</body>
+</html>
