@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Phaser 3 俄罗斯方块</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    background: #07070d;
+    color: #e8e8f0;
+    font-family: "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  #wrap { display: flex; flex-direction: column; align-items: center; padding: 18px 8px 36px; }
+  h1 { font-size: 20px; font-weight: 600; letter-spacing: 3px; margin: 6px 0 14px; color: #9aa6ff; }
+  #game { box-shadow: 0 0 46px rgba(90,110,255,.25); border-radius: 10px; overflow: hidden; }
+  .tips { margin-top: 16px; font-size: 13px; line-height: 2.1; color: #8b8ba7; text-align: center; max-width: 640px; }
+  kbd {
+    background: #1c1c2b; border: 1px solid #33334d; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 7px; font-size: 12px; color: #cfd2ff; font-family: monospace;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>TETRIS · PHASER 3</h1>
+  <div id="game"></div>
+  <div class="tips">
+    <kbd>←</kbd> <kbd>→</kbd> 移动 &nbsp;·&nbsp;
+    <kbd>↑</kbd> / <kbd>X</kbd> 顺时针旋转 &nbsp;·&nbsp;
+    <kbd>Z</kbd> 逆时针 &nbsp;·&nbsp;
+    <kbd>↓</kbd> 软降 &nbsp;·&nbsp;
+    <kbd>空格</kbd> 硬降 &nbsp;·&nbsp;
+    <kbd>C</kbd> 暂存 &nbsp;·&nbsp;
+    <kbd>P</kbd> 暂停 &nbsp;·&nbsp;
+    <kbd>R</kbd> 重开 &nbsp;·&nbsp; 手机可点屏幕下方按钮
+  </div>
+</div>
+
+<script>
+/* =========================================================
+ *  常量配置：棋盘 10 列 × 20 行，每格 30px
+ * =======================================================*/
+const COLS = 10, ROWS = 20, TILE = 30;
+const BOARD_X = 30, BOARD_Y = 30, SIDE_W = 190;
+const BOARD_W = COLS * TILE, BOARD_H = ROWS * TILE;
+const PAD_H = 74;                       // 底部触屏按钮区高度
+const W = BOARD_X * 2 + BOARD_W + SIDE_W;
+const H = BOARD_Y * 2 + BOARD_H + PAD_H;
+
+/* 7 种方块的形状矩阵（1 = 有格子） */
+const SHAPES = {
+  I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  J: [[1,0,0],[1,1,1],[0,0,0]],
+  L: [[0,0,1],[1,1,1],[0,0,0]],
+  O: [[1,1],[1,1]],
+  S: [[0,1,1],[1,1,0],[0,0,0]],
+  T: [[0,1,0],[1,1,1],[0,0,0]],
+  Z: [[1,1,0],[0,1,1],[0,0,0]]
+};
+const COLORS = { I: 0x22d3ee, J: 0x3b82f6, L: 0xf59e0b, O: 0xfacc15, S: 0x22c55e, T: 0xa855f7, Z: 0xef4444 };
+const TYPES = Object.keys(SHAPES);
+const LINE_SCORE = [0, 100, 300, 500, 800];
+
+/* =========================================================
+ *  工具函数
+ * =======================================================*/
+function rotateMatrix(m, dir) {          // dir=1 顺时针，dir=-1 逆时针
+  const n = m.length;
+  const out = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let r = 0; r < n; r++)
+    for (let c = 0; c < n; c++) {
+      if (dir > 0) out[c][n - 1 - r] = m[r][c];
+      else         out[n - 1 - c][r] = m[r][c];
+    }
+  return out;
+}
+
+/* 画一个带高光/阴影的方块 */
+function drawBlock(gfx, px, py, size, color, alpha) {
+  const s = size - 2, h = Math.max(2, Math.round(s * 0.22));
+  gfx.fillStyle(color, alpha).fillRect(px + 1, py + 1, s, s);
+  gfx.fillStyle(0xffffff, 0.25 * alpha).fillRect(px + 1, py + 1, s, h);
+  gfx.fillStyle(0x000000, 0.28 * alpha).fillRect(px + 1, py + size - h - 1, s, h);
+}
+
+/* =========================================================
+ *  主场景
+ * =======================================================*/
+class TetrisScene extends Phaser.Scene {
+  constructor() { super('Tetris'); }
+
+  create() {
+    this.input.keyboard.resetKeys();
+    this.input.keyboard.addCapture(['UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']);
+    this.input.addPointer(2);
+
+    /* ---------- 棋盘背景与网格 ---------- */
+    const g = this.add.graphics();
+    g.fillStyle(0x0b0b14, 1).fillRect(0, 0, W, H);
+    g.fillStyle(0x101019, 1).fillRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
+    g.lineStyle(1, 0x1d1d2e, 1);
+    for (let c = 1; c < COLS; c++) g.lineBetween(BOARD_X + c * TILE, BOARD_Y, BOARD_X + c * TILE, BOARD_Y + BOARD_H);
+    for (let r = 1; r < ROWS; r++) g.lineBetween(BOARD_X, BOARD_Y + r * TILE, BOARD_X + BOARD_W, BOARD_Y + r * TILE);
+    g.lineStyle(3, 0x4b4b7a, 1).strokeRect(BOARD_X - 2, BOARD_Y - 2, BOARD_W + 4, BOARD_H + 4);
+
+    /* ---------- 已落定方块的小格子（用 Rectangle 对象，只变色不重画） ---------- */
+    this.cells = [];
+    for (let r = 0; r < ROWS; r++) {
+      this.cells[r] = [];
+      for (let c = 0; c < COLS; c++) {
+        this.cells[r][c] = this.add.rectangle(
+          BOARD_X + c * TILE + 1, BOARD_Y + r * TILE + 1, TILE - 2, TILE - 2, 0xffffff
+        ).setOrigin(0, 0).setVisible(false);
+      }
+    }
+
+    /* ---------- 侧栏 UI ---------- */
+    const sx = BOARD_X + BOARD_W + 20;
+    const label = (y, txt) => this.add.text(sx, y, txt,
+      { fontFamily: 'monospace', fontSize: '13px', color: '#6f76a8' });
+
+    label(BOARD_Y, 'SCORE');
+    this.scoreText = this.add.text(sx, BOARD_Y + 16, '0',
+      { fontFamily: 'monospace', fontSize: '28px', color: '#ffffff' });
+
+    label(BOARD_Y + 66, 'LEVEL');
+    this.levelText = this.add.text(sx, BOARD_Y + 82, '1',
+      { fontFamily: 'monospace', fontSize: '20px', color: '#7dd3fc' });
+
+    label(BOARD_Y + 118, 'LINES');
+    this.linesText = this.add.text(sx, BOARD_Y + 134, '0',
+      { fontFamily: 'monospace', fontSize: '20px', color: '#86efac' });
+
+    // NEXT 面板
+    const nextPanelY = BOARD_Y + 176;
+    this.add.rectangle(sx, nextPanelY, 170, 100, 0x101019).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x2a2a44);
+    label(nextPanelY + 8, 'NEXT');
+    this.nextGfx = this.add.graphics();
+
+    // HOLD 面板
+    const holdPanelY = nextPanelY + 112;
+    this.add.rectangle(sx, holdPanelY, 170, 90, 0x101019).setOrigin(0, 0)
+      .setStrokeStyle(1, 0x2a2a44);
+    label(holdPanelY + 8, 'HOLD (C)');
+    this.holdGfx = this.add.graphics();
+
+    // 说明
+    this.add.text(sx, holdPanelY + 104,
+      '← → 移动\n↑/X 旋转\nZ 逆转\n↓ 软降\n空格 硬降\nP 暂停  R 重开',
+      { fontFamily: 'monospace', fontSize: '12px', color: '#5b6088', lineSpacing: 4 });
+
+    /* ---------- 活动方块 & 幽灵预览 ---------- */
+    this.pieceGfx = this.add.graphics();
+
+    /* ---------- 键盘 ---------- */
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.keyZ = this.input.keyboard.addKey('Z');
+    this.keyX = this.input.keyboard.addKey('X');
+    this.keySpace = this.input.keyboard.addKey('SPACE');
+    this.keyC = this.input.keyboard.addKey('C');
+    this.keyP = this.input.keyboard.addKey('P');
+    this.keyR = this.input.keyboard.addKey('R');
+
+    /* ---------- 触屏按钮 ---------- */
+    const btnY = BOARD_Y + BOARD_H + 16, btnH = 44;
+    const btn = (x, y, w, label, cb) => {
+      const bg = this.add.rectangle(x, y, w, btnH, 0x1b1b2c).setOrigin(0, 0)
+        .setStrokeStyle(1, 0x3a3a5c).setInteractive({ useHandCursor: true });
+      this.add.text(x + w / 2, y + btnH / 2, label,
+        { fontFamily: 'monospace', fontSize: '20px', color: '#cfd2ff' }).setOrigin(0.5);
+      bg.on('pointerdown', cb);
+    };
+    const bw = 52, gap = 10, total = bw * 5 + gap * 4;
+    let bx = BOARD_X + (BOARD_W - total) / 2;
+    btn(bx, btnY, bw, '◀', () => this.move(-1)); bx += bw + gap;
+    btn(bx, btnY, bw, '▶', () => this.move(1));  bx += bw + gap;
+    btn(bx, btnY, bw, '⟳', () => this.rotate(1)); bx += bw + gap;
+    btn(bx, btnY, bw, '⤓', () => this.hardDrop()); bx += bw + gap;
+    btn(bx, btnY, bw, 'C', () => this.holdPiece());
+
+    /* ---------- 暂停 / 结束遮罩 ---------- */
+    this.overlay = this.add.container(0, 0).setDepth(10).setVisible(false);
+    const dim = this.add.rectangle(BOARD_X, BOARD_Y, BOARD_W, BOARD_H, 0x000000, 0.72).setOrigin(0, 0);
+    this.overlayTitle = this.add.text(BOARD_X + BOARD_W / 2, BOARD_Y + BOARD_H / 2 - 18, '',
+      { fontFamily: 'monospace', fontSize: '32px', color: '#ffffff' }).setOrigin(0.5);
+    this.overlaySub = this.add.text(BOARD_X + BOARD_W / 2, BOARD_Y + BOARD_H / 2 + 24, '',
+      { fontFamily: 'monospace', fontSize: '15px', color: '#a5a8c8' }).setOrigin(0.5);
+    this.overlay.add([dim, this.overlayTitle, this.overlaySub]);
+
+    /* ---------- 状态 ---------- */
+    this.repeatState = {};
+    this.resetGame();
+  }
+
+  /* ---------------- 初始化一局 ---------------- */
+  resetGame() {
+    this.grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(null));
+    this.score = 0;
+    this.level = 1;
+    this.lines = 0;
+    this.holdType = null;
+    this.canHold = true;
+    this.over = false;
+    this.paused = false;
+    this.dropCounter = 0;
+    this.queue = this.makeBag();
+    this.overlay.setVisible(false);
+    this.refreshCells();
+    this.updateHUD();
+    this.spawnPiece();
+  }
+
+  /* 7-bag 随机：每一轮把 7 种方块洗牌后依次发出，手感更均匀 */
+  makeBag() {
+    const b = TYPES.slice();
+    for (let i = b.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [b[i], b[j]] = [b[j], b[i]];
+    }
+    return b;
+  }
+  nextType() {
+    if (this.queue.length <= 1) this.queue.push(...this.makeBag());
+    return this.queue.shift();
+  }
+  peekType() {
+    if (this.queue.length <= 1) this.queue.push(...this.makeBag());
+    return this.queue[0];
+  }
+
+  newPiece(type) {
+    const m = SHAPES[type].map(row => row.slice());
+    return { type, m, x: Math.floor((COLS - m[0].length) / 2), y: 0 };
+  }
+
+  spawnPiece() {
+    const type = this.nextType();
+    this.piece = this.newPiece(type);
+    this.canHold = true;
+    this.drawPreview(this.nextGfx, this.peekType(),
+      BOARD_X + BOARD_W + 20 + 85, BOARD_Y + 176 + 62);
+    if (this.collides(this.piece.m, this.piece.x, this.piece.y)) this.endGame();
+  }
+
+  /* ---------------- 碰撞检测 ---------------- */
+  collides(m, ox, oy) {
+    for (let r = 0; r < m.length; r++) {
+      for (let c = 0; c < m[r].length; c++) {
+        if (!m[r][c]) continue;
+        const x = ox + c, y = oy + r;
+        if (x < 0 || x >= COLS || y >= ROWS) return true;
+        if (y >= 0 && this.grid[y][x]) return true;
+      }
+    }
+    return false;
+  }
+
+  /* ---------------- 操作 ---------------- */
+  move(dir) {
+    if (this.over || this.paused) return;
+    if (!this.collides(this.piece.m, this.piece.x + dir, this.piece.y)) this.piece.x += dir;
+  }
+
+  rotate(dir) {
+    if (this.over || this.paused) return;
+    const rm = rotateMatrix(this.piece.m, dir);
+    for (const k of [0, -1, 1, -2, 2]) {          // 简单的“踢墙”修正
+      if (!this.collides(rm, this.piece.x + k, this.piece.y)) {
+        this.piece.m = rm; this.piece.x += k; return;
+      }
+    }
+  }
+
+  softDropStep() {
+    if (!this.collides(this.piece.m, this.piece.x, this.piece.y + 1)) {
+      this.piece.y++;
+      this.score += 1;
+      this.updateHUD();
+      return true;
+    }
+    this.lockPiece();
+    return false;
+  }
+
+  hardDrop() {
+    if (this.over || this.paused) return;
+    let d = 0;
+    while (!this.collides(this.piece.m, this.piece.x, this.piece.y + 1)) { this.piece.y++; d++; }
+    this.score += d * 2;
+    this.lockPiece();
+  }
+
+  holdPiece() {
+    if (this.over || this.paused || !this.canHold) return;
+    const cur = this.piece.type;
+    if (this.holdType) {
+      const swap = this.holdType;
+      this.holdType = cur;
+      this.piece = this.newPiece(swap);
+      if (this.collides(this.piece.m, this.piece.x, this.piece.y)) { this.endGame(); return; }
+    } else {
+      this.holdType = cur;
+      this.spawnPiece();
+    }
+    this.canHold = false;
+    this.drawPreview(this.holdGfx, this.holdType,
+      BOARD_X + BOARD_W + 20 + 85, BOARD_Y + 288 + 50);
+  }
+
+  /* ---------------- 落定 & 消行 ---------------- */
+  lockPiece() {
+    const { m, x, y, type } = this.piece;
+    for (let r = 0; r < m.length; r++)
+      for (let c = 0; c < m[r].length; c++)
+        if (m[r][c] && y + r >= 0) this.grid[y + r][x + c] = type;
+
+    this.refreshCells();
+    this.clearLines();
+    if (this.over) return;
+    this.spawnPiece();
+    this.dropCounter = 0;
+  }
+
+  clearLines() {
+    const full = [];
+    for (let r = 0; r < ROWS; r++)
+      if (this.grid[r].every(v => v)) full.push(r);
+    if (!full.length) return;
+
+    // 闪一下白条，再真正消除
+    const flash = this.add.graphics().setDepth(5);
+    full.forEach(r => flash.fillStyle(0xffffff, 0.9)
+      .fillRect(BOARD_X, BOARD_Y + r * TILE, BOARD_W, TILE));
+    this.time.delayedCall(110, () => {
+      flash.destroy();
+      full.sort((a, b) => a - b).forEach(r => {
+        this.grid.splice(r, 1);
+        this.grid.unshift(new Array(COLS).fill(null));
+      });
+      this.lines += full.length;
+      this.score += LINE_SCORE[full.length] * this.level;
+      this.level = Math.floor(this.lines / 10) + 1;
+      this.refreshCells();
+      this.updateHUD();
+    });
+  }
+
+  /* ---------------- 渲染 ---------------- */
+  refreshCells() {
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++) {
+        const t = this.grid[r][c], v = this.cells[r][c];
+        if (t) { v.setFillStyle(COLORS[t]); v.setVisible(true); }
+        else v.setVisible(false);
+      }
+  }
+
+  drawPreview(gfx, type, cx, cy) {
+    gfx.clear();
+    if (!type) return;
+    const m = SHAPES[type], size = 18;
+    let minR = 99, maxR = -1, minC = 99, maxC = -1;
+    for (let r = 0; r < m.length; r++)
+      for (let c = 0; c < m[r].length; c++)
+        if (m[r][c]) {
+          minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+          minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+        }
+    const ox = cx - (maxC - minC + 1) * size / 2;
+    const oy = cy - (maxR - minR + 1) * size / 2;
+    for (let r = minR; r <= maxR; r++)
+      for (let c = minC; c <= maxC; c++)
+        if (m[r][c])
+          drawBlock(gfx, ox + (c - minC) * size, oy + (r - minR) * size, size, COLORS[type], 1);
+  }
+
+  drawActive() {
+    this.pieceGfx.clear();
+    if (!this.piece) return;
+    const { m, x, y, type } = this.piece;
+    let gy = y;
+    while (!this.collides(m, x, gy + 1)) gy++;          // 幽灵方块落点
+    for (let r = 0; r < m.length; r++)
+      for (let c = 0; c < m[r].length; c++)
+        if (m[r][c])
+          drawBlock(this.pieceGfx, BOARD_X + (x + c) * TILE, BOARD_Y + (gy + r) * TILE, TILE, COLORS[type], 0.15);
+    for (let r = 0; r < m.length; r++)
+      for (let c = 0; c < m[r].length; c++)
+        if (m[r][c])
+          drawBlock(this.pieceGfx, BOARD_X + (x + c) * TILE, BOARD_Y + (y + r) * TILE, TILE, COLORS[type], 1);
+  }
+
+  updateHUD() {
+    this.scoreText.setText(String(this.score));
+    this.levelText.setText(String(this.level));
+    this.linesText.setText(String(this.lines));
+  }
+
+  /* ---------------- 结束 / 暂停 ---------------- */
+  endGame() {
+    this.over = true;
+    this.overlayTitle.setText('GAME OVER');
+    this.overlaySub.setText('得分 ' + this.score + ' · 按 R 重新开始');
+    this.overlay.setVisible(true);
+  }
+
+  togglePause() {
+    if (this.over) return;
+    this.paused = !this.paused;
+    if (this.paused) {
+      this.overlayTitle.setText('PAUSED');
+      this.overlaySub.setText('按 P 继续');
+      this.overlay.setVisible(true);
+    } else {
+      this.overlay.setVisible(false);
+    }
+  }
+
+  /* ---------------- 主循环 ---------------- */
+  dropInterval() {
+    return Math.max(80, 800 - (this.level - 1) * 70);   // 等级越高落得越快
+  }
+
+  repeat(name, isDown, delta, fn) {
+    let st = this.repeatState[name];
+    if (!isDown) { this.repeatState[name] = { started: false, timer: 0 }; return; }
+    if (!st) st = this.repeatState[name] = { started: false, timer: 0 };
+    if (!st.started) { st.started = true; st.timer = 0; fn(); return; }
+    st.timer += delta;
+    if (st.timer >= 55) { st.timer = 0; fn(); }
+  }
+
+  update(time, delta) {
+    if (Phaser.Input.Keyboard.JustDown(this.keyR)) { this.scene.restart(); return; }
+    if (Phaser.Input.Keyboard.JustDown(this.keyP)) this.togglePause();
+    if (this.over || this.paused) return;
+
+    // 左右长按连续移动
+    this.repeat('left', this.cursors.left.isDown, delta, () => this.move(-1));
+    this.repeat('right', this.cursors.right.isDown, delta, () => this.move(1));
+
+    // 旋转 / 硬降 / 暂存
+    if (Phaser.Input.Keyboard.JustDown(this.keyX) || Phaser.Input.Keyboard.JustDown(this.cursors.up)) this.rotate(1);
+    if (Phaser.Input.Keyboard.JustDown(this.keyZ)) this.rotate(-1);
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.hardDrop();
+    if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.holdPiece();
+
+    // 重力
+    const interval = this.cursors.down.isDown
+      ? Math.min(50, this.dropInterval())
+      : this.dropInterval();
+    this.dropCounter += delta;
+    while (this.dropCounter >= interval) {
+      this.dropCounter -= interval;
+      this.softDropStep();
+      if (this.over) return;
+    }
+
+    this.drawActive();
+  }
+}
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  parent: 'game',
+  backgroundColor: '#0b0b14',
+  scene: [TetrisScene]
+});
+</script>
+</body>
+</html>
