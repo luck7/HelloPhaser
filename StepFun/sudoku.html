@@ -159,8 +159,8 @@ function computeCandidates(grid, i) {
  * =======================================================*/
 const CELL = 56, BOARD = CELL * 9, BX = 30, BY = 30;
 const GAME_W = 880, GAME_H = 660;
-const PANEL_X = 700;                 // 右侧操作面板中心（棋盘右缘为 534，不再重叠）
-const KEYPAD_Y = 590;                // 底部数字键盘
+const PANEL_X = 700;            // 右侧操作面板中心（棋盘右缘 534，不重叠）
+const KEYPAD_Y = 590;           // 底部数字键盘
 const DIFFS = { easy: { holes: 40, name: '简单' }, medium: { holes: 48, name: '中等' }, hard: { holes: 54, name: '困难' } };
 
 class SudokuScene extends Phaser.Scene {
@@ -183,7 +183,7 @@ class SudokuScene extends Phaser.Scene {
 
     this.bg = this.add.graphics();
 
-    // 主数字文本（每个格子 1 个）
+    // 主数字文本
     this.cellTexts = [];
     for (let i = 0; i < 81; i++) {
       const r = Math.floor(i / 9), c = i % 9;
@@ -192,7 +192,7 @@ class SudokuScene extends Phaser.Scene {
       this.cellTexts.push(t);
     }
 
-    // 候选数文本（每个格子 3x3 = 9 个位置，均匀分布）
+    // 候选数文本（每格 9 个独立文本，按 3x3 九宫格均匀分布）
     this.candTexts = [];
     for (let i = 0; i < 81; i++) {
       const r = Math.floor(i / 9), c = i % 9;
@@ -209,7 +209,6 @@ class SudokuScene extends Phaser.Scene {
 
     this.buildUI();
 
-    // 棋盘点击选区
     this.add.rectangle(BX, BY, BOARD, BOARD).setOrigin(0).setInteractive()
       .on('pointerdown', (p) => {
         const c = Math.floor((p.x - BX) / CELL), r = Math.floor((p.y - BY) / CELL);
@@ -222,58 +221,82 @@ class SudokuScene extends Phaser.Scene {
 
   // ---------- UI ----------
   buildUI() {
-    this.add.text(PANEL_X, 26, '数  独', { fontFamily: FONT, fontSize: '28px', fontStyle: 'bold', color: '#ffffff', resolution: 2 }).setOrigin(0.5, 0);
-    this.add.text(PANEL_X, 66, 'SUDOKU', { fontFamily: FONT, fontSize: '14px', color: '#9fb6d8', resolution: 2 }).setOrigin(0.5, 0);
-
-    this.add.text(PANEL_X, 96, '— 难度 —', { fontFamily: FONT, fontSize: '15px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
+    // （已按要求移除顶部"数独"标题，面板从难度选择开始）
+    this.add.text(PANEL_X, 30, '— 难 度 —', { fontFamily: FONT, fontSize: '16px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
     this.diffButtons = {};
     ['easy', 'medium', 'hard'].forEach((d, i) => {
-      this.diffButtons[d] = this.makeButton(PANEL_X, 132 + i * 38, 200, 32, DIFFS[d].name, 0x2f4a75, () => this.newGame(d));
+      this.diffButtons[d] = this.makeButton(PANEL_X, 68 + i * 38, 200, 32, DIFFS[d].name, 0x2f4a75, () => this.newGame(d));
     });
 
-    this.add.text(PANEL_X, 248, '— 功能 —', { fontFamily: FONT, fontSize: '15px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
-    this.btnNew      = this.makeButton(PANEL_X, 284, 200, 32, '↻  重新出题',   0x3a6ea5, () => this.newGame(this.difficulty));
-    this.btnHint     = this.makeButton(PANEL_X, 322, 200, 32, '💡  提  示',      0x3a6ea5, () => this.giveHint());
-    this.btnPencil   = this.makeButton(PANEL_X, 360, 200, 32, '✏  铅笔模式',    0x3a6ea5, () => this.togglePencil());
-    this.btnAutoCand = this.makeButton(PANEL_X, 398, 200, 32, '🔢  自动可能项', 0x3a6ea5, () => this.autoCandidates());
-    this.btnCheck    = this.makeButton(PANEL_X, 436, 200, 32, '✔  检查错误',    0x3a6ea5, () => this.toggleErrors());
-    this.btnClear    = this.makeButton(PANEL_X, 474, 200, 32, '⌫  清除本格',    0x3a6ea5, () => this.clearCell());
-    this.btnCustom   = this.makeButton(PANEL_X, 522, 200, 34, '✎  自定义题目',  0x8a5a2b, () => this.customButton());
+    this.add.text(PANEL_X, 190, '— 功 能 —', { fontFamily: FONT, fontSize: '16px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
+    this.btnNew      = this.makeButton(PANEL_X, 226, 200, 32, '↻  重新出题',   0x3a6ea5, () => this.newGame(this.difficulty));
+    this.btnHint     = this.makeButton(PANEL_X, 262, 200, 32, '💡  提  示',      0x3a6ea5, () => this.giveHint());
+    this.btnPencil   = this.makeButton(PANEL_X, 298, 200, 32, '✏  铅笔模式',    0x3a6ea5, () => this.togglePencil());
+    this.btnAutoCand = this.makeButton(PANEL_X, 334, 200, 32, '🔢  自动可能项', 0x3a6ea5, () => this.autoCandidates());
+    this.btnCheck    = this.makeButton(PANEL_X, 370, 200, 32, '✔  检查错误',    0x3a6ea5, () => this.toggleErrors());
+    this.btnClear    = this.makeButton(PANEL_X, 406, 200, 32, '⌫  清除本格',    0x3a6ea5, () => this.clearCell());
+    this.btnCustom   = this.makeButton(PANEL_X, 452, 200, 34, '✎  自定义题目',  0x8a5a2b, () => this.customButton());
 
-    this.msg = this.add.text(PANEL_X, 566, '',
+    this.msg = this.add.text(PANEL_X, 500, '',
       { fontFamily: FONT, fontSize: '14px', color: '#ffe9a8', wordWrap: { width: 210 }, align: 'center', lineSpacing: 5, resolution: 2 }).setOrigin(0.5, 0);
-    this.stats = this.add.text(PANEL_X, 626, '',
-      { fontFamily: FONT, fontSize: '14px', color: '#c3d4ea', align: 'center', lineSpacing: 5, resolution: 2 }).setOrigin(0.5, 0);
+
+    // 状态栏（已上移，远离画布底边，避免被遮挡）
+    this.stats = this.add.text(PANEL_X, 594, '',
+      { fontFamily: FONT, fontSize: '15px', color: '#cfe0f5', align: 'center', lineSpacing: 6, resolution: 2 }).setOrigin(0.5, 0);
 
     // 底部数字键盘
-    this.add.text(BX + BOARD / 2, 556, '数 字 键 盘', { fontFamily: FONT, fontSize: '14px', color: '#a9bdd6', resolution: 2 }).setOrigin(0.5);
+    this.add.text(BX + BOARD / 2, 552, '数 字 键 盘', { fontFamily: FONT, fontSize: '14px', color: '#a9bdd6', resolution: 2 }).setOrigin(0.5);
+    this.keypadButtons = {};
+    this.keypadState = {};
     for (let n = 1; n <= 9; n++) {
-      this.makeButton(BX + (n - 1) * (CELL + 0.4) + CELL / 2, KEYPAD_Y, 52, 44, String(n), 0x40567c, () => this.inputNumber(n));
+      this.keypadButtons[n] = this.makeButton(BX + (n - 1) * (CELL + 0.4) + CELL / 2, KEYPAD_Y, 52, 44,
+        String(n), 0x40567c, () => this.inputNumber(n));
+      this.keypadState[n] = true;
     }
     this.updateLabels();
   }
 
-  // 按钮工厂：fill 是可变状态，保证“选中态”不会因鼠标移出而丢失
+  // 按钮工厂：fill 为可变状态；支持 setEnabled 置灰
   makeButton(x, y, w, h, label, fill, cb) {
     const c = this.add.container(x, y);
     const g = this.add.graphics();
     const t = this.add.text(0, 0, label, { fontFamily: FONT, fontSize: '16px', color: '#ffffff', resolution: 2 }).setOrigin(0.5);
     c.add([g, t]);
-    const btn = { container: c, text: t, fill: fill };
-    btn.draw = () => {
+    const btn = { container: c, text: t, fill: fill, disabled: false, w, h };
+
+    const paint = (col, line, txtCol) => {
       g.clear();
-      g.fillStyle(btn.fill, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 8);
-      g.lineStyle(1, 0xffffff, 0.22).strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
+      g.fillStyle(col, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 8);
+      g.lineStyle(1, line, 0.25).strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
+      t.setColor(txtCol);
+    };
+    btn.draw = () => {
+      if (btn.disabled) paint(0x5b6478, 0xffffff, '#9aa4b4');
+      else paint(btn.fill, 0xffffff, '#ffffff');
     };
     btn.setFill = (f) => { btn.fill = f; btn.draw(); };
+
+    // 置灰 / 恢复（状态变化时才真正执行，避免重复注册）
+    btn.setEnabled = (en) => {
+      if (btn.disabled === !en) return;
+      btn.disabled = !en;
+      if (en) {
+        c.setInteractive({ useHandCursor: true });
+        c.on('pointerover', () => { if (!btn.disabled) paint(Phaser.Display.Color.ValueToColor(btn.fill).lighten(16).color, 0xffffff, '#ffffff'); });
+        c.on('pointerout', btn.draw);
+        c.on('pointerup', cb);
+      } else {
+        c.disableInteractive();
+        c.removeAllListeners();
+      }
+      btn.draw();
+    };
+
     btn.draw();
-    c.setSize(w, h).setInteractive({ useHandCursor: true });
-    c.on('pointerover', () => {
-      g.clear();
-      g.fillStyle(Phaser.Display.Color.ValueToColor(btn.fill).lighten(16).color, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 8);
-      g.lineStyle(1, 0xffffff, 0.3).strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
-    });
-    c.on('pointerout', btn.draw);   // 恢复当前状态色（而非初始色）
+    c.setSize(w, h);
+    c.setInteractive({ useHandCursor: true });
+    c.on('pointerover', () => { if (!btn.disabled) paint(Phaser.Display.Color.ValueToColor(btn.fill).lighten(16).color, 0xffffff, '#ffffff'); });
+    c.on('pointerout', btn.draw);
     c.on('pointerup', cb);
     return btn;
   }
@@ -301,6 +324,8 @@ class SudokuScene extends Phaser.Scene {
   // ---------- 输入 ----------
   inputNumber(n) {
     if (this.completed) return;
+    // 某数字已在棋盘出现 9 次 -> 该数字已全部完成，按钮置灰且拒绝输入
+    if (this.countOf(n) >= 9) { this.setMessage(`数字 ${n} 已全部完成（9 个）`); this.redraw(); return; }
     if (this.customEditing) {
       if (this.selected >= 0) this.values[this.selected] = (this.values[this.selected] === n ? 0 : n);
       this.redraw();
@@ -318,6 +343,12 @@ class SudokuScene extends Phaser.Scene {
     }
     this.checkComplete();
     this.redraw();
+  }
+
+  countOf(n) {
+    let c = 0;
+    for (const v of this.values) if (v === n) c++;
+    return c;
   }
 
   clearCell() {
@@ -502,7 +533,21 @@ class SudokuScene extends Phaser.Scene {
           if (s.has(n)) row[n - 1].setText(String(n)).setVisible(true);
       }
     }
+
+    this.updateKeypad();
     this.drawStats();
+  }
+
+  // 数字键盘：某数字在棋盘上已满 9 个 -> 按钮置灰
+  updateKeypad() {
+    for (let n = 1; n <= 9; n++) {
+      const done = this.countOf(n) >= 9;
+      const next = !done;
+      if (this.keypadState[n] !== next) {
+        this.keypadState[n] = next;
+        this.keypadButtons[n].setEnabled(next);
+      }
+    }
   }
 
   drawStats() {
