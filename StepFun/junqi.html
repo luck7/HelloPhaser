@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>网页军旗 · Phaser 3</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0e141c;color:#dfe7f1;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  #wrap{display:flex;gap:14px;padding:14px;align-items:flex-start;justify-content:center;flex-wrap:wrap}
+  #game{width:400px;max-width:96vw;border-radius:10px;overflow:hidden;box-shadow:0 8px 30px #0008}
+  #panel{width:340px;max-width:96vw;background:#161f2b;border:1px solid #24303f;border-radius:10px;padding:14px}
+  h1{font-size:19px;margin:0 0 10px}
+  h2{font-size:13px;margin:14px 0 6px;color:#9fb3c8}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button,select{background:#243449;color:#dfe7f1;border:1px solid #33465e;border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer;font-family:inherit}
+  button:hover,select:hover{background:#2d4160}
+  button.on{background:#c0392b;border-color:#e07b6a}
+  button.side.on{background:#2b6cb0;border-color:#7aa7d8}
+  #status{background:#101823;border:1px solid #24303f;border-radius:8px;padding:8px 10px;font-size:13px;margin:10px 0;line-height:1.6}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:#1d2937;border:1px solid #33465e;border-radius:8px;padding:5px 8px;font-size:13px;cursor:pointer;user-select:none}
+  .chip:hover{background:#27384c}
+  .chip.sel{outline:2px solid #ffd166;background:#2b3a4d}
+  .cap{display:flex;flex-wrap:wrap;gap:4px;font-size:13px;line-height:1.9}
+  .cap span{background:#222d3b;border-radius:6px;padding:2px 6px}
+  .cap span.k{background:#3a2a2a}
+  #log{height:160px;overflow:auto;background:#101823;border:1px solid #24303f;border-radius:8px;padding:8px;font-size:12px;line-height:1.6}
+  #log div{border-bottom:1px dashed #1e2836;padding:2px 0}
+  details{font-size:12px;color:#a9bdd4;line-height:1.8;margin-top:10px}
+  summary{cursor:pointer;color:#9fb3c8}
+  .tip{font-size:12px;color:#8ba0b8}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="game"></div>
+  <div id="panel">
+    <h1>🚩 网页军旗（Phaser 3）</h1>
+    <div class="row">
+      <button id="btnAi">人机对战</button>
+      <button id="btnPvp">双人对战</button>
+      <button id="btnAuto">自动布阵</button>
+      <button id="btnNew">重新开始</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="tip">我执：</span>
+      <button class="side" data-side="red">红方（先手）</button>
+      <button class="side" data-side="blue">蓝方（后手）</button>
+      <select id="diff">
+        <option value="easy">AI 简单</option>
+        <option value="normal" selected>AI 普通</option>
+        <option value="hard">AI 困难</option>
+      </select>
+    </div>
+    <div id="status">选择模式开始游戏</div>
+
+    <div id="placeBox">
+      <h2>备战区（先点棋子，再点棋盘放置；点已放棋子可收回）</h2>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <h2>阵亡棋子</h2>
+    <div class="cap" id="capRed"></div>
+    <div class="cap" id="capBlue"></div>
+    <div class="cap" id="known"></div>
+
+    <h2>战报</h2>
+    <div id="log"></div>
+
+    <details>
+      <summary>规则速查（点开展开）</summary>
+      <p>
+        · 棋盘 6×12，双方各 25 枚棋子，各自布阵于本方 6×5 区域（行营格不可放子）。<br/>
+        · 军旗只能放在<b>大本营</b>（底线中间两格）；地雷只能放在本方最后两排。<br/>
+        · 官子大小：司令&gt;军长&gt;师长&gt;旅长&gt;团长&gt;营长&gt;连长&gt;排长&gt;工兵；同归于尽。<br/>
+        · 工兵可排地雷；炸弹与任何子相撞同归于尽；地雷、炸弹、军旗不能移动。<br/>
+        · <b>行营</b>（绿色格）内的棋子不可被攻击；铁路（浅色格）上工兵可沿直线任意格行走（不能越过棋子）。<br/>
+        · 暗棋规则：对方未交战过的棋子显示为“？”，交战后双方永久明示。<br/>
+        · 胜负：吃掉对方军旗，或对方无子可动。
+      </p>
+    </details>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============ 1. 基础数据 ============ */
+const COLS=6, ROWS=12, CELL=58, OX=26, OY=46;
+const W=OX*2+COLS*CELL, H=OY+ROWS*CELL+26;
+const cellX=c=>OX+c*CELL+CELL/2;
+const cellY=r=>OY+r*CELL+CELL/2;
+
+const PIECES={
+  commander:{name:'司令',rank:40,label:'司',v:16},
+  army     :{name:'军长',rank:39,label:'军',v:14},
+  division :{name:'师长',rank:38,label:'师',v:12},
+  brigade  :{name:'旅长',rank:37,label:'旅',v:11},
+  regiment :{name:'团长',rank:36,label:'团',v:10},
+  battalion:{name:'营长',rank:35,label:'营',v:9},
+  company  :{name:'连长',rank:34,label:'连',v:8},
+  platoon  :{name:'排长',rank:33,label:'排',v:7},
+  engineer :{name:'工兵',rank:32,label:'工',v:9},
+  bomb     :{name:'炸弹',rank:0 ,label:'弹',v:13},
+  mine     :{name:'地雷',rank:0 ,label:'雷',v:12},
+  flag     :{name:'军旗',rank:0 ,label:'旗',v:1000}
+};
+const INITIAL=[['commander',1],['army',1],['division',2],['brigade',2],['regiment',2],
+               ['battalion',2],['company',3],['platoon',3],['engineer',3],['bomb',2],
+               ['mine',3],['flag',1]];
+const IMMOBILE=new Set(['bomb','mine','flag']);
+// 行营（10 个：双方各 4 + 中部 2）
+const CAMPS=new Set(['1,2','4,2','1,3','4,3','1,8','4,8','1,9','4,9','2,5','3,6']);
+// 大本营
+const BASES={red:[[1,11],[4,11]],blue:[[1,0],[4,0]]};
+
+const isCamp=(r,c)=>CAMPS.has(r+','+c);
+function isBase(o,r,c){return BASES[o].some(b=>b[0]===c&&b[1]===r);}
+function isRail(r,c){
+  if(r===5||r===6)return true;
+  if(c===0||c===5)return true;
+  if(c===2||c===3)return !isCamp(r,c);
+  return false;
+}
+function inZone(o,r,c){return o==='red'?(r>=7&&r<=11):(r>=0&&r<=4);}
+const other=s=>s==='red'?'blue':'red';
+const sideName=s=>s==='red'?'红方':'蓝方';
+const nm=p=>`${p.owner==='red'?'红':'蓝'}${PIECES[p.type].name}`;
+
+/* ============ 2. 状态 ============ */
+let board=[], state=null, scene=null;
+
+function newState(mode,human){
+  board=Array.from({length:ROWS},()=>Array(COLS).fill(null));
+  const reserve={red:{},blue:{}};
+  INITIAL.forEach(([t,n])=>{reserve.red[t]=n;reserve.blue[t]=n;});
+  state={
+    mode,human,aiSide:other(human),
+    difficulty:(document.getElementById('diff')||{value:'normal'}).value,
+    phase:'place',turn:'red',
+    placingSide:(mode==='ai')?human:'red',
+    selType:null,sel:null,legal:[],
+    reserve,cap:{red:[],blue:[]},mem:{red:{},blue:{}},log:[]
+  };
+}
+const reserveCount=s=>Object.values(state.reserve[s]).reduce((a,b)=>a+b,0);
+
+/* ============ 3. 规则 ============ */
+function battle(a,d){ // a 攻 d
+  const A=PIECES[a.type],D=PIECES[d.type];
+  if(a.type==='bomb'||d.type==='bomb')return {aDies:true,dDies:true};
+  if(d.type==='mine')return a.type==='engineer'?{aDies:false,dDies:true}:{aDies:true,dDies:false};
+  if(a.type==='mine')return {aDies:true,dDies:false};
+  if(d.type==='flag')return {aDies:false,dDies:true};
+  if(A.rank===D.rank)return {aDies:true,dDies:true};
+  return A.rank>D.rank?{aDies:false,dDies:true}:{aDies:true,dDies:false};
+}
+
+function legalMoves(r,c){
+  const p=board[r][c];
+  if(!p||IMMOBILE.has(p.type))return [];
+  const out=[],seen=new Set(),dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  const push=(tr,tc,cap)=>{const k=tr+','+tc;if(!seen.has(k)){seen.add(k);out.push({fr:r,fc:c,tr,tc,capture:cap});}};
+  for(const [dr,dc] of dirs){
+    const nr=r+dr,nc=c+dc;
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
+    const t=board[nr][nc];
+    if(t&&t.owner===p.owner)continue;
+    if(t&&isCamp(nr,nc))continue;          // 行营内不可被攻击
+    push(nr,nc,!!t);
+  }
+  if(p.type==='engineer'&&isRail(r,c)){    // 工兵铁路直线行走
+    for(const [dr,dc] of dirs){
+      let nr=r+dr,nc=c+dc;
+      while(nr>=0&&nr<ROWS&&nc>=0&&nc<COLS&&isRail(nr,nc)){
+        const t=board[nr][nc];
+        if(t){ if(t.owner!==p.owner&&!isCamp(nr,nc))push(nr,nc,true); break; }
+        push(nr,nc,false);
+        nr+=dr;nc+=dc;
+      }
+    }
+  }
+  return out;
+}
+
+function canPlace(side,type,r,c){
+  if(!inZone(side,r,c))return false;
+  if(isCamp(r,c))return false;
+  if(board[r][c])return false;
+  if(type==='flag')return isBase(side,r,c);
+  if(type==='mine')return side==='red'?(r>=10):(r<=1);
+  return true;
+}
+function placeReason(side,type,r,c){
+  if(!inZone(side,r,c))return '只能摆在本方阵地';
+  if(isCamp(r,c))return '行营不能放子';
+  if(board[r][c])return '该格已有棋子';
+  if(type==='flag')return '军旗必须放在大本营';
+  if(type==='mine')return '地雷只能放在本方最后两排';
+  return '不能放在这里';
+}
+function hasAnyMove(side){
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const p=board[r][c];
+    if(p&&p.owner===side&&legalMoves(r,c).length)return true;
+  }
+  return false;
+}
+function rememberCapture(p){state.mem[p.owner][p.type]=(state.mem[p.owner][p.type]||0)+1;}
+
+/* ============ 4. 自动布阵 ============ */
+function pick(list,ws){let s=0;for(const w of ws)s+=w;let x=Math.random()*s;
+  for(let i=0;i<list.length;i++){x-=ws[i];if(x<=0)return list[i];}return list[list.length-1];}
+function wPlace(side,type,r,c){
+  const d=side==='red'?(11-r):r; // 0 = 最底排
+  switch(type){
+    case 'mine':return d<=1?1:0.02;
+    case 'bomb':return (d>=1&&d<=3)?1:0.15;
+    case 'commander':case 'army':return (d===2||d===3)?1:0.2;
+    case 'division':case 'brigade':return (d>=2&&d<=4)?1:0.3;
+    case 'engineer':return d>=2?0.85:0.4;
+    default:return 1;
+  }
+}
+function autoPlace(side){
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)
+    if(board[r][c]&&board[r][c].owner===side)board[r][c]=null;
+  const items=[];
+  INITIAL.forEach(([t,n])=>{for(let i=0;i<n;i++)items.push(t);});
+  const ord=t=>({flag:0,mine:1,bomb:2,commander:3,army:3,division:4,brigade:4})[t]||5;
+  Phaser.Utils.Array.Shuffle(items);
+  items.sort((a,b)=>ord(a)-ord(b));
+  const free=[],used=new Set();
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)
+    if(inZone(side,r,c)&&!isCamp(r,c))free.push([r,c]);
+  for(const t of items){
+    const cands=free.filter(([r,c])=>!used.has(r+','+c)&&canPlace(side,t,r,c));
+    let tgt=cands.length?pick(cands,cands.map(([r,c])=>wPlace(side,t,r,c))):null;
+    if(!tgt){const any=free.filter(([r,c])=>!used.has(r+','+c));if(any.length)tgt=any[0];}
+    if(tgt){used.add(tgt[0]+','+tgt[1]);board[tgt[0]][tgt[1]]={type:t,owner:side,revealed:false};
+      state.reserve[side][t]--;}
+  }
+}
+
+/* ============ 5. AI ============ */
+function aiPool(foe){
+  const counts={};INITIAL.forEach(([t,n])=>counts[t]=n);
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const p=board[r][c];
+    if(p&&p.owner===foe&&p.revealed)counts[p.type]--;
+  }
+  const mem=state.mem[foe];
+  for(const t in mem)counts[t]-=mem[t];
+  const pool=[];for(const t in counts){let n=counts[t];while(n-->0)pool.push(t);}
+  return pool.length?pool:['platoon'];
+}
+function canBeat(att,def){const r=battle({type:att},{type:def});return r.dDies&&!r.aDies;}
+function dist(a,b,c,d){return Math.abs(a-c)+Math.abs(b-d);}
+
+function aiChooseMove(){
+  const me=state.aiSide,foe=other(me),moves=[];
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const p=board[r][c];
+    if(!p||p.owner!==me)continue;
+    for(const m of legalMoves(r,c))moves.push(m);
+  }
+  if(!moves.length)return null;
+  const pool=aiPool(foe),diff=state.difficulty;
+  let best=null,bestS=-1e9;
+  for(const m of moves){
+    const s=aiScore(m,pool,me,foe,diff)+(diff==='hard'?Math.random()*0.4:Math.random()*1.6);
+    if(s>bestS){bestS=s;best=m;}
+  }
+  return best;
+}
+function aiScore(m,pool,me,foe,diff){
+  const p=board[m.fr][m.fc];
+  if(!p)return -1e9;
+  const P=PIECES[p.type];
+  let s=0;
+  if(m.capture){
+    const d=board[m.tr][m.tc];
+    if(d.revealed){
+      const res=battle(p,d);
+      if(d.type==='flag')return 1e6;
+      if(res.aDies&&res.dDies)s+=PIECES[d.type].v*1.0-P.v*0.9;
+      else if(res.dDies)s+=PIECES[d.type].v*2.2+(PIECES[d.type].rank>P.rank?6:0)+(PIECES[d.type].v-P.v)*0.3;
+      else s-=P.v*2.4;
+    }else{
+      let ev=0;
+      for(const ty of pool){
+        const res=battle(p,{type:ty});
+        if(res.dDies&&!res.aDies)ev+=PIECES[ty].v;
+        else if(res.dDies&&res.aDies)ev+=PIECES[ty].v*0.5-P.v*0.5;
+        else ev-=P.v;
+      }
+      ev/=pool.length;
+      s+=ev*1.25+(p.type==='engineer'?1.5:0);
+    }
+  }else{
+    const advance=(me==='blue')?(m.tr-m.fr):(m.fr-m.tr);   // 向对方底线推进
+    s+=advance*1.2;
+    if(isCamp(m.tr,m.tc))s+=3;                             // 躲进行营
+    if(p.type==='engineer'&&isRail(m.tr,m.tc))s+=0.5;
+    if(diff!=='easy'){                                     // 落点是否会被邻敌吃掉
+      let vuln=0;
+      for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+        const nr=m.tr+dr,nc=m.tc+dc;
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
+        const e=board[nr][nc];
+        if(e&&e.owner===foe&&!isCamp(m.tr,m.tc)&&canBeat(e.type,p.type))vuln=Math.max(vuln,P.v);
+      }
+      s-=vuln*1.5;
+    }
+    // 尽量不要抽走唯一守护军旗的子
+    let myFlag=null;
+    for(let r=0;r<ROWS&&!myFlag;r++)for(let c=0;c<COLS;c++){
+      const q=board[r][c];if(q&&q.owner===me&&q.type==='flag'){myFlag=[r,c];break;}
+    }
+    if(myFlag&&dist(m.fr,m.fc,myFlag[0],myFlag[1])===1){
+      let guards=0;
+      for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+        const nr=myFlag[0]+dr,nc=myFlag[1]+dc;
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
+        const q=board[nr][nc];
+        if(q&&q.owner===me&&!IMMOBILE.has(q.type))guards++;
+      }
+      if(guards<=1)s-=4;
+    }
+  }
+  return s;
+}
+
+/* ============ 6. 场景 ============ */
+class Main extends Phaser.Scene{
+  constructor(){super('main');}
+  create(){
+    scene=this;
+    this.cameras.main.setBackgroundColor('#131a24');
+    this.drawTerrain();
+    this.add.text(OX,OY-26,'蓝方阵地',{fontSize:'14px',color:'#7fa8d8',fontFamily:'system-ui'});
+    this.add.text(OX,OY+ROWS*CELL+6,'红方阵地',{fontSize:'14px',color:'#d88a7f',fontFamily:'system-ui'});
+    this.pieceLayer=this.add.container(0,0);
+    this.hlLayer=this.add.container(0,0);
+    this.fxLayer=this.add.container(0,0);
+    this.menuText=this.add.text(W/2,H/2,'请选择右侧对战模式',{fontSize:'22px',color:'#dfe7f1',fontFamily:'system-ui'}).setOrigin(0.5);
+    this.busy=false;
+    this.input.on('pointerdown',p=>this.onPointer(p));
+    newState('ai','red');
+    this.redraw();
+  }
+
+  drawTerrain(){
+    const g=this.add.graphics();
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      const x=OX+c*CELL,y=OY+r*CELL;
+      let fill;
+      if(r<=4)fill=0x1d3556; else if(r>=7)fill=0x45242c; else fill=0x2b3140;
+      if(isRail(r,c))fill=(r<=4)?0x244268:((r>=7)?0x542c36:0x39415a);
+      if(isCamp(r,c))fill=0x2f5d4a;
+      if(isBase('red',r,c)||isBase('blue',r,c))fill=0x5f4a24;
+      g.fillStyle(fill,1);g.fillRect(x+1,y+1,CELL-2,CELL-2);
+      const h=(r===5||r===6),v=(c===0||c===5)||((c===2||c===3)&&!isCamp(r,c));
+      g.lineStyle(2,0xa9c4dd,0.3);
+      if(h){g.beginPath();g.moveTo(x+3,y+CELL/2-5);g.lineTo(x+CELL-3,y+CELL/2-5);
+            g.moveTo(x+3,y+CELL/2+5);g.lineTo(x+CELL-3,y+CELL/2+5);g.strokePath();}
+      if(v){g.beginPath();g.moveTo(x+CELL/2-5,y+3);g.lineTo(x+CELL/2-5,y+CELL-3);
+            g.moveTo(x+CELL/2+5,y+3);g.lineTo(x+CELL/2+5,y+CELL-3);g.strokePath();}
+      if(isCamp(r,c)){g.lineStyle(2,0x8fd6a0,0.85);g.strokeRect(x+4,y+4,CELL-8,CELL-8);}
+      if(isBase('red',r,c)||isBase('blue',r,c)){g.lineStyle(2,0xf0c674,0.9);g.strokeRect(x+3,y+3,CELL-6,CELL-6);}
+    }
+    g.lineStyle(3,0x53637a,1);g.strokeRect(OX,OY,COLS*CELL,ROWS*CELL);
+  }
+
+  makePiece(x,y,p,viewer){
+    const own=p.owner===viewer;
+    const c=this.add.container(x,y);
+    let base;
+    if(own)base=(p.owner==='red')?0xb03a2e:0x2b6cb0;
+    else base=p.revealed?((p.owner==='red')?0x7a3530:0x2f4f7a):0x39404d;
+    const rect=this.add.rectangle(0,0,CELL-12,CELL-12,base,1)
+      .setStrokeStyle(2,own?0xf3d9a4:0x1b2029);
+    const lab=own?PIECES[p.type].label:(p.revealed?PIECES[p.type].label:'？');
+    const col=own?'#ffffff':(p.revealed?'#ffd9a0':'#9aa6b5');
+    const t=this.add.text(0,0,lab,{fontSize:'24px',color:col,fontStyle:'bold',fontFamily:'system-ui'}).setOrigin(0.5);
+    c.add([rect,t]);
+    return c;
+  }
+  ring(x,y,color,w){
+    return this.hlLayer.add(this.add.rectangle(x,y,CELL-6,CELL-6).setStrokeStyle(w||3,color).setFillStyle(0x000000,0));
+  }
+  redraw(){
+    if(!state)return;
+    this.menuText.setVisible(state.phase==='menu');
+    this.pieceLayer.removeAll(true);
+    this.views=[];
+    const viewer=viewerSide();
+    for(let r=0;r<ROWS;r++){
+      this.views[r]=[];
+      for(let c=0;c<COLS;c++){
+        const p=board[r][c];
+        this.views[r][c]=p?this.pieceLayer.add(this.makePiece(cellX(c),cellY(r),p,viewer)):null;
+      }
+    }
+    this.movingView=null;
+    if(this.pending){
+      this.movingView=this.pieceLayer.add(
+        this.makePiece(cellX(this.pending.fc),cellY(this.pending.fr),this.pending.piece,viewer));
+    }
+    this.hlLayer.removeAll(true);
+    if(state.phase==='battle'&&state.sel){
+      this.ring(cellX(state.sel.c),cellY(state.sel.r),0xffd166);
+      for(const m of state.legal){
+        if(m.capture)this.ring(cellX(m.tc),cellY(m.tr),0xff6b6b);
+        else this.hlLayer.add(this.add.circle(cellX(m.tc),cellY(m.tr),6,0x7bd88f,0.95));
+      }
+    }
+    renderPanel();
+  }
+  flashCell(r,c,color){
+    const rect=this.add.rectangle(cellX(c),cellY(r),CELL-6,CELL-6)
+      .setStrokeStyle(4,color).setFillStyle(color,0.25);
+    this.fxLayer.add(rect);
+    this.tweens.add({targets:rect,alpha:0,scale:1.4,duration:520,onComplete:()=>rect.destroy()});
+  }
+  popText(r,c,msg,color){
+    const t=this.add.text(cellX(c),cellY(r),msg,{fontSize:'18px',color:color,fontStyle:'bold',fontFamily:'system-ui'}).setOrigin(0.5);
+    this.fxLayer.add(t);
+    this.tweens.add({targets:t,y:cellY(r)-42,alpha:0,duration:900,onComplete:()=>t.destroy()});
+  }
+
+  cellAt(x,y){
+    const c=Math.floor((x-OX)/CELL),r=Math.floor((y-OY)/CELL);
+    if(c<0||c>=COLS||r<0||r>=ROWS)return null;
+    return {r,c};
+  }
+  onPointer(p){
+    const cell=this.cellAt(p.x,p.y);
+    if(!cell)return;
+    if(state.phase==='place')this.doPlace(cell.r,cell.c);
+    else if(state.phase==='battle')this.doBattle(cell.r,cell.c);
+  }
+
+  /* ---- 布阵 ---- */
+  doPlace(r,c){
+    if(this.busy)return;
+    const side=state.placingSide;
+    const cur=board[r][c];
+    if(cur&&cur.owner===side){                       // 收回
+      state.reserve[side][cur.type]++;
+      board[r][c]=null;state.selType=cur.type;
+      this.redraw();return;
+    }
+    const type=state.selType;
+    if(!type){log('请先在右侧备战区选择要摆放的棋子');return;}
+    if((state.reserve[side][type]||0)<=0){log('该棋子已经摆完了');return;}
+    if(!canPlace(side,type,r,c)){log(placeReason(side,type,r,c));return;}
+    board[r][c]={type,owner:side,revealed:false};
+    state.reserve[side][type]--;
+    const left=Object.keys(state.reserve[side]).filter(t=>state.reserve[side][t]>0);
+    state.selType=left.length===1?left[0]:(state.reserve[side][type]>0?type:null);
+    this.redraw();
+    if(reserveCount(side)===0)this.finishPlacement(side);
+  }
+  finishPlacement(side){
+    if(state.mode==='pvp'){
+      if(side==='red'){
+        state.placingSide='blue';state.selType=null;
+        log('红方布阵完成，请蓝方布阵（红方选手请回避）');
+      }else{
+        state.phase='battle';state.turn='red';
+        log('双方布阵完成，红方先行！');
+      }
+    }else{
+      autoPlace(state.aiSide);
+      state.phase='battle';state.turn='red';
+      log('双方布阵完成，红方先行！');
+    }
+    this.busy=false;
+    this.redraw();
+    if(state.mode==='ai')this.maybeAI();
+  }
+
+  /* ---- 行棋 ---- */
+  select(r,c){
+    const p=board[r][c];
+    if(!p||p.owner!==state.turn){state.sel=null;state.legal=[];this.redraw();return;}
+    const mv=legalMoves(r,c);
+    if(!mv.length){log(`${nm(p)} 不能移动`);state.sel=null;state.legal=[];}
+    else{state.sel={r,c};state.legal=mv;}
+    this.redraw();
+  }
+  doBattle(r,c){
+    if(this.busy||state.phase!=='battle')return;
+    if(state.mode==='ai'&&state.turn===state.aiSide)return;
+    const p=board[r][c];
+    if(state.sel){
+      const mv=state.legal.find(m=>m.tr===r&&m.tc===c);
+      if(mv){this.startMove(mv);return;}
+      if(p&&p.owner===state.turn){this.select(r,c);return;}
+      state.sel=null;state.legal=[];this.redraw();return;
+    }
+    if(p&&p.owner===state.turn)this.select(r,c);
+    else if(p)log('那是对方的棋子');
+  }
+  startMove(m){
+    if(this.busy)return;
+    this.busy=true;
+    const p=board[m.fr][m.fc],d=board[m.tr][m.tc];
+    board[m.fr][m.fc]=null;
+    this.pending={piece:p,def:d,fr:m.fr,fc:m.fc,tr:m.tr,tc:m.tc};
+    state.sel=null;state.legal=[];
+    this.redraw();
+    this.tweens.add({targets:this.movingView,x:cellX(m.tc),y:cellY(m.tr),duration:190,
+      ease:'Quad.easeInOut',
+      onComplete:()=>{
+        if(this.pending.def)this.resolveCombat();
+        else{this.pending=null;this.busy=false;this.redraw();this.endTurn();}
+      }});
+  }
+  resolveCombat(){
+    const {piece:a,def:d,tr,tc}=this.pending;
+    a.revealed=true;d.revealed=true;
+    const res=battle(a,d);
+    let msg,col;
+    if(a.type==='bomb'||d.type==='bomb'){msg=`${nm(a)} 撞上 ${nm(d)}，同归于尽！`;col='#ffb366';}
+    else if(d.type==='mine'){msg=a.type==='engineer'?`${nm(a)} 排掉了 ${nm(d)}！`:`${nm(a)} 踩中 ${nm(d)}，阵亡！`;col=a.type==='engineer'?'#7bd88f':'#ff6b6b';}
+    else if(res.aDies&&res.dDies){msg=`${nm(a)} 与 ${nm(d)} 同归于尽！`;col='#ffb366';}
+    else if(res.dDies){msg=`${nm(a)} 吃掉了 ${nm(d)}！`;col='#7bd88f';}
+    else{msg=`${nm(a)} 被 ${nm(d)} 吃掉！`;col='#ff6b6b';}
+    if(res.aDies)rememberCapture(a);
+    if(res.dDies)rememberCapture(d);
+    board[tr][tc]=res.aDies?null:a;
+    this.pending=null;
+    log(msg);
+    this.flashCell(tr,tc,res.aDies?0xff6b6b:0x7bd88f);
+    this.popText(tr,tc,res.aDies&&!res.dDies?'阵亡':(res.dDies&&!res.aDies?'得胜':'同尽'),col);
+    this.redraw();
+    if(d.type==='flag'){this.gameOver(a.owner,`${sideName(a.owner)}夺得军旗！`);return;}
+    this.busy=false;
+    this.endTurn();
+  }
+  endTurn(){
+    if(state.phase==='over')return;
+    state.turn=other(state.turn);
+    if(!hasAnyMove(state.turn)){
+      this.gameOver(other(state.turn),`${sideName(state.turn)}无子可动`);
+      return;
+    }
+    this.redraw();
+    this.maybeAI();
+  }
+  maybeAI(){
+    if(state.mode!=='ai'||state.phase!=='battle'||state.turn!==state.aiSide)return;
+    this.time.delayedCall(520,()=>{
+      if(state.phase!=='battle')return;
+      const m=aiChooseMove();
+      if(m)this.startMove(m);
+      else this.gameOver(state.human,'AI 无子可动');
+    });
+  }
+  gameOver(winner,reason){
+    state.phase='over';state.winner=winner;
+    log(`🏆 ${sideName(winner)}获胜 —— ${reason}`);
+    this.fxLayer.add(this.add.text(W/2,H/2-24,`${sideName(winner)}获胜`,
+      {fontSize:'40px',color:winner==='red'?'#ff9c8a':'#8ab6ff',fontStyle:'bold',fontFamily:'system-ui'}).setOrigin(0.5));
+    this.fxLayer.add(this.add.text(W/2,H/2+22,reason,
+      {fontSize:'16px',color:'#dfe7f1',fontFamily:'system-ui'}).setOrigin(0.5));
+    this.redraw();
+  }
+}
+
+function viewerSide(){
+  if(state.mode==='ai')return state.human;
+  return state.phase==='place'?state.placingSide:state.turn;
+}
+
+/* ============ 7. 面板 ============ */
+function log(s){
+  if(!state)return;
+  state.log.push(s);
+  if(state.log.length>200)state.log.shift();
+  renderPanel();
+}
+function renderPanel(){
+  const st=document.getElementById('status');
+  if(!st||!state)return;
+  let html='';
+  if(state.phase==='menu')html='选择模式开始游戏';
+  else if(state.phase==='place')html=`<b>${sideName(state.placingSide)}</b>布阵中 · 剩余 <b>${reserveCount(state.placingSide)}</b> 枚`;
+  else if(state.phase==='battle')html=`<b>${sideName(state.turn)}</b>行棋`+
+    (state.mode==='ai'?(state.turn===state.human?'（你）':'（AI 思考中…）'):'');
+  else html=`<b>${sideName(state.winner)}</b>获胜 🏆`;
+  st.innerHTML=html;
+
+  const placeBox=document.getElementById('placeBox'),chips=document.getElementById('chips');
+  if(state.phase==='place'){
+    placeBox.style.display='';
+    let ch='';
+    for(const [t,n] of INITIAL){
+      const left=state.reserve[state.placingSide][t]||0;
+      if(left<=0)continue;
+      ch+=`<div class="chip${state.selType===t?' sel':''}" data-t="${t}">${PIECES[t].label} ${PIECES[t].name} ×${left}</div>`;
+    }
+    chips.innerHTML=ch||'<span class="tip">布阵完成</span>';
+    chips.querySelectorAll('.chip').forEach(el=>el.onclick=()=>{state.selType=el.dataset.t;renderPanel();});
+  }else placeBox.style.display='none';
+
+  const capOf=o=>state.cap[o].length
+    ?state.cap[o].map(t=>`<span class="k">${PIECES[t].label}</span>`).join('')
+    :'<span class="tip">无</span>';
+  document.getElementById('capRed').innerHTML='红方阵亡：'+capOf('red');
+  document.getElementById('capBlue').innerHTML='蓝方阵亡：'+capOf('blue');
+
+  let kn='';
+  if(state.mode==='ai'){
+    const seen=[];
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      const p=board[r][c];
+      if(p&&p.owner===state.aiSide&&p.revealed)seen.push(PIECES[p.type].label);
+    }
+    kn='已探明敌军：'+(seen.length?seen.map(s=>`<span>${s}</span>`).join(''):'<span class="tip">尚无</span>');
+  }
+  document.getElementById('known').innerHTML=kn;
+
+  document.getElementById('log').innerHTML=
+    state.log.slice(-40).reverse().map(l=>`<div>${l}</div>`).join('');
+
+  document.getElementById('btnAi').classList.toggle('on',state.mode==='ai');
+  document.getElementById('btnPvp').classList.toggle('on',state.mode==='pvp');
+  document.querySelectorAll('.side').forEach(b=>
+    b.classList.toggle('on',state.mode==='ai'&&state.human===b.dataset.side));
+}
+
+/* ============ 8. 启动 ============ */
+function startGame(mode){
+  const human=(document.querySelector('.side.on')||{dataset:{side:'red'}}).dataset.side;
+  newState(mode,human);
+  scene.fxLayer.removeAll(true);
+  scene.busy=false;scene.pending=null;
+  log(mode==='ai'?`人机对战开始，你执${sideName(human)}，请布阵`:'双人对战开始，红方先布阵');
+  scene.redraw();
+}
+document.getElementById('btnAi').onclick=()=>startGame('ai');
+document.getElementById('btnPvp').onclick=()=>startGame('pvp');
+document.getElementById('btnNew').onclick=()=>startGame(state?state.mode:'ai');
+document.getElementById('btnAuto').onclick=()=>{
+  if(!state||state.phase!=='place')return;
+  autoPlace(state.placingSide);
+  if(reserveCount(state.placingSide)===0)scene.finishPlacement(state.placingSide);
+  else{state.selType=null;scene.redraw();}
+};
+document.querySelectorAll('.side').forEach(b=>b.onclick=()=>{
+  if(!state||state.mode!=='ai')return;
+  if(state.phase!=='menu'&&state.phase!=='place')return;
+  state.human=b.dataset.side;state.aiSide=other(state.human);
+  state.placingSide=state.human;state.selType=null;
+  scene.redraw();
+});
+
+new Phaser.Game({
+  type:Phaser.AUTO,width:W,height:H,parent:'game',
+  backgroundColor:'#131a24',
+  scale:{mode:Phaser.Scale.FIT,autoCenter:Phaser.Scale.CENTER_BOTH},
+  scene:[Main]
+});
+})();
+</script>
+</body>
+</html>
