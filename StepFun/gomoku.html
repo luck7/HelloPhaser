@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>五子棋 · 人机对战 (Phaser 3)</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    background: linear-gradient(135deg, #1b2735 0%, #090a0f 100%);
+    color: #e8e8e8;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh;
+  }
+  h1 { font-size: 22px; margin: 18px 0 6px; letter-spacing: 2px; font-weight: 600; }
+  #status {
+    font-size: 16px; margin: 4px 0 12px; padding: 6px 18px;
+    background: rgba(255,255,255,.08); border-radius: 20px;
+    border: 1px solid rgba(255,255,255,.12);
+  }
+  #game { box-shadow: 0 12px 40px rgba(0,0,0,.6); border-radius: 8px; overflow: hidden; }
+  #panel { margin: 14px 0 24px; display: flex; gap: 12px; }
+  button {
+    padding: 9px 22px; font-size: 14px; cursor: pointer;
+    color: #fff; background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.25); border-radius: 8px;
+    transition: all .18s;
+  }
+  button:hover { background: rgba(255,255,255,.22); transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  .tip { font-size: 12px; color: #8b96a5; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<h1>五子棋 · 人机对战</h1>
+<div id="status">黑棋（你）先行，点击棋盘落子</div>
+<div id="game"></div>
+<div id="panel">
+  <button id="btn-restart">重新开始</button>
+  <button id="btn-undo">悔棋</button>
+  <button id="btn-swap">切换先手</button>
+</div>
+<div class="tip">规则：任意一方在横 / 竖 / 斜方向先连成 5 子即获胜</div>
+
+<script>
+/* ================= 基本配置 ================= */
+const SIZE   = 15;              // 15 路棋盘
+const CELL   = 40;              // 格子像素
+const MARGIN = 30;              // 边距
+const BOARD_PX = MARGIN * 2 + CELL * (SIZE - 1);
+const W = 640, H = BOARD_PX + 20;
+
+const EMPTY = 0, BLACK = 1, WHITE = 2;   // 黑=玩家，白=AI
+
+let board, current, gameOver, aiThinking, history;
+let stoneLayer, gfx, lastMark, statusEl;
+
+/* ================= Phaser 场景 ================= */
+class GomokuScene extends Phaser.Scene {
+  constructor() { super('gomoku'); }
+
+  create() {
+    statusEl = document.getElementById('status');
+
+    // 背景
+    this.add.rectangle(W / 2, H / 2, W, H, 0x2b3a4a).setOrigin(0.5);
+    // 棋盘木纹底
+    this.add.rectangle(W / 2, H / 2, BOARD_PX + 24, BOARD_PX + 24, 0xd9a862)
+      .setStrokeStyle(2, 0x8a6229);
+
+    // 网格线
+    gfx = this.add.graphics();
+    gfx.lineStyle(1, 0x5b3d17, 1);
+    for (let i = 0; i < SIZE; i++) {
+      gfx.moveTo(MARGIN, MARGIN + i * CELL); gfx.lineTo(MARGIN + (SIZE - 1) * CELL, MARGIN + i * CELL);
+      gfx.moveTo(MARGIN + i * CELL, MARGIN); gfx.lineTo(MARGIN + i * CELL, MARGIN + (SIZE - 1) * CELL);
+    }
+    gfx.strokePath();
+    // 外框加粗
+    gfx.lineStyle(2, 0x5b3d17, 1);
+    gfx.strokeRect(MARGIN, MARGIN, (SIZE - 1) * CELL, (SIZE - 1) * CELL);
+    // 星位
+    [[3,3],[3,11],[11,3],[11,11],[7,7]].forEach(([x,y]) => {
+      gfx.fillStyle(0x5b3d17, 1);
+      gfx.fillCircle(MARGIN + x * CELL, MARGIN + y * CELL, 4);
+    });
+
+    stoneLayer = this.add.container(0, 0);
+    lastMark = this.add.graphics();
+
+    this.input.on('pointerdown', this.onPointerDown, this);
+    this.resetGame();
+  }
+
+  /* ---------- 重置 ---------- */
+  resetGame(firstPlayer = BLACK) {
+    board = Array.from({ length: SIZE }, () => new Array(SIZE).fill(EMPTY));
+    history = [];
+    current = firstPlayer;
+    gameOver = false;
+    aiThinking = false;
+    stoneLayer.removeAll(true);
+    lastMark.clear();
+    this.setStatus(firstPlayer === BLACK ? '黑棋（你）先行，点击棋盘落子'
+                                         : 'AI 先行，请等待…');
+    if (firstPlayer === WHITE) this.aiMove();
+  }
+
+  /* ---------- 鼠标落子 ---------- */
+  onPointerDown(pointer) {
+    if (gameOver || current !== BLACK || aiThinking) return;
+    const x = Math.round((pointer.x - MARGIN) / CELL);
+    const y = Math.round((pointer.y - MARGIN) / CELL);
+    if (!this.inside(x, y) || board[x][y] !== EMPTY) return;
+    // 距离校正：点击太远则忽略
+    if (Math.hypot(pointer.x - this.px(x), pointer.y - this.px(y)) > CELL * 0.6) return;
+    this.doMove(x, y, BLACK);
+    if (!gameOver) this.aiMove();
+  }
+
+  inside(x, y) { return x >= 0 && y >= 0 && x < SIZE && y < SIZE; }
+  px(i) { return MARGIN + i * CELL; }
+
+  /* ---------- 落子主流程 ---------- */
+  doMove(x, y, color) {
+    board[x][y] = color;
+    history.push({ x, y, color });
+
+    const cx = this.px(x), cy = this.px(y);
+    const c = this.add.circle(cx, cy, CELL * 0.42, color === BLACK ? 0x1a1a1a : 0xf5f5f5);
+    c.setStrokeStyle(1, color === BLACK ? 0x000000 : 0xbbbbbb);
+    stoneLayer.add(c);
+    // 落子动画
+    c.setScale(0.2); this.tweens.add({ targets: c, scale: 1, duration: 140, ease: 'Back.out' });
+
+    this.drawLastMark(x, y);
+
+    const win = this.findWin(x, y, color);
+    if (win) {
+      gameOver = true;
+      this.highlightWin(win);
+      this.setStatus(color === BLACK ? '🎉 你赢了！' : '💻 AI 获胜，再来一局？');
+      return;
+    }
+    if (history.length === SIZE * SIZE) { gameOver = true; this.setStatus('平局！'); return; }
+    current = color === BLACK ? WHITE : BLACK;
+  }
+
+  drawLastMark(x, y) {
+    lastMark.clear();
+    lastMark.lineStyle(2, 0xff5252, 1);
+    lastMark.strokeCircle(this.px(x), this.px(y), CELL * 0.16);
+  }
+
+  highlightWin(cells) {
+    const pts = cells.map(([x, y]) => new Phaser.Geom.Point(this.px(x), this.px(y)));
+    const line = new Phaser.Geom.Line(pts[0].x, pts[0].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
+    this.tweens.addCounter({
+      from: 0, to: 1, duration: 500, yoyo: true, repeat: 3,
+      onUpdate: t => {
+        lastMark.clear();
+        lastMark.lineStyle(5, 0xff3b3b, t.getValue());
+        lastMark.strokeLineShape(line);
+      }
+    });
+  }
+
+  setStatus(t) { statusEl.textContent = t; }
+
+  /* ================= AI ================= */
+  aiMove() {
+    aiThinking = true;
+    this.setStatus('AI 思考中…');
+    this.time.delayedCall(120, () => {
+      const mv = this.bestMove();
+      aiThinking = false;
+      if (mv) this.doMove(mv.x, mv.y, WHITE);
+      if (!gameOver) this.setStatus('轮到你（黑棋）落子');
+    });
+  }
+
+  /* 棋型打分：站在空点 (x,y) 上，为 color 一方评估价值 */
+  evalPoint(x, y, color) {
+    const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
+    let total = 0;
+    for (const [dx, dy] of DIRS) {
+      let count = 1, open = 0;
+      for (const s of [1, -1]) {                 // 正反两个方向
+        let i = 1;
+        while (true) {
+          const nx = x + dx * i * s, ny = y + dy * i * s;
+          if (!this.inside(nx, ny) || board[nx][ny] === EMPTY) {
+            if (this.inside(nx, ny) && board[nx][ny] === EMPTY) open++;
+            break;
+          }
+          if (board[nx][ny] !== color) break;     // 被对手堵住
+          count++; i++;
+        }
+      }
+      if      (count >= 5) total += 1000000;      // 连五
+      else if (count === 4) total += open === 2 ? 120000 : open === 1 ? 12000 : 0; // 活四/冲四
+      else if (count === 3) total += open === 2 ? 10000  : open === 1 ? 900   : 0; // 活三/眠三
+      else if (count === 2) total += open === 2 ? 700    : open === 1 ? 90    : 0;
+      else                 total += open === 2 ? 25     : 12;
+    }
+    return total;
+  }
+
+  /* 选点：进攻分 + 防守分 */
+  bestMove() {
+    if (history.length === 0) return { x: 7, y: 7 };
+    const cands = [];
+    for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) {
+      if (board[x][y] !== EMPTY) continue;
+      if (!this.hasNeighbor(x, y, 2)) continue;   // 只考虑已有棋子附近
+      const atk = this.evalPoint(x, y, WHITE);
+      const def = this.evalPoint(x, y, BLACK);
+      const center = (Math.abs(x - 7) + Math.abs(y - 7)) * -1; // 轻微偏好中心
+      cands.push({ x, y, score: atk + def * 0.88 + center, atk });
+    }
+    if (!cands.length) {                           // 理论上不会到这
+      for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++)
+        if (board[x][y] === EMPTY) cands.push({ x, y, score: 0 });
+    }
+    cands.sort((a, b) => b.score - a.score);
+    // 最高分附近随机取一个，避免每局完全一样
+    const best = cands[0];
+    const pool = cands.filter(c => c.score >= best.score - 1).slice(0, 3);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  hasNeighbor(x, y, r) {
+    for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) {
+      const nx = x + i, ny = y + j;
+      if (this.inside(nx, ny) && board[nx][ny] !== EMPTY) return true;
+    }
+    return false;
+  }
+
+  /* ================= 胜负判定 ================= */
+  findWin(x, y, color) {
+    const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
+    for (const [dx, dy] of DIRS) {
+      const cells = [[x, y]];
+      for (const s of [1, -1]) {
+        let i = 1;
+        while (true) {
+          const nx = x + dx * i * s, ny = y + dy * i * s;
+          if (this.inside(nx, ny) && board[nx][ny] === color) { cells.push([nx, ny]); i++; }
+          else break;
+        }
+      }
+      if (cells.length >= 5) return cells;
+    }
+    return null;
+  }
+
+  /* ================= 悔棋 ================= */
+  undo() {
+    if (gameOver || history.length === 0 || aiThinking) return;
+    // 撤销玩家 + AI 两步；若当前轮到玩家且上一步是玩家，则只撤玩家
+    const pop = () => {
+      const m = history.pop();
+      board[m.x][m.y] = EMPTY;
+      const last = stoneLayer.list[stoneLayer.list.length - 1];
+      if (last) last.destroy();
+      return m;
+    };
+    const lastMv = history[history.length - 1];
+    if (lastMv && lastMv.color === WHITE) { pop(); pop(); }
+    else pop();
+    current = BLACK;
+    const l = history[history.length - 1];
+    if (l) this.drawLastMark(l.x, l.y); else lastMark.clear();
+    this.setStatus('已悔棋，轮到你（黑棋）落子');
+  }
+}
+
+/* ================= 启动 ================= */
+const game = new Phaser.Game({
+  type: Phaser.AUTO,
+  width: W, height: H,
+  parent: 'game',
+  backgroundColor: '#2b3a4a',
+  scene: GomokuScene
+});
+
+// 让场景方法可被按钮调用
+game.events.once('ready', () => {});
+const getScene = () => game.scene.getScene('gomoku');
+
+document.getElementById('btn-restart').onclick = () => getScene().resetGame(BLACK);
+document.getElementById('btn-undo').onclick    = () => getScene().undo();
+document.getElementById('btn-swap').onclick    = () => getScene().resetGame(WHITE);
+</script>
+</body>
+</html>
