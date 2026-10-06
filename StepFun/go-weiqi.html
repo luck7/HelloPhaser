@@ -97,7 +97,8 @@ const GAME_SIZE = 640;                // 画布边长
 const CELL = 30;                      // 格距
 const FRAME_PAD = 11;                 // 木框到最外一条网格线的距离
 const LABEL_PAD = 27;                 // 坐标号中心到最外一条网格线的距离
-let boardSize = 19;
+const HALF = 0.5;                     // 1px 网格线对齐像素中心，避免半覆盖导致的虚化
+const DEFAULT_SIZE = 19;
 
 function starPoints(n) {
   const s = n === 19 ? [3, 9, 15] : n === 13 ? [3, 6, 9] : [2, 4, 6];
@@ -208,12 +209,11 @@ window.addEventListener('pointerdown', () => sfx.resume());   // 满足浏览器
 class GoScene extends Phaser.Scene {
   constructor() { super('GoScene'); }
 
-  init(data) { this.n = (data && data.size) || boardSize; }
+  init() { this.n = DEFAULT_SIZE; }
 
   create() {
-    const n = this.n;
     this.cell = CELL;
-    this.margin = (GAME_SIZE - (n - 1) * this.cell) / 2;   // 小棋盘居中偏移
+    this.margin = (GAME_SIZE - (this.n - 1) * this.cell) / 2;   // 小棋盘居中偏移
     this.radius = this.cell * 0.45;
     this.mode = document.getElementById('selMode').value;
     this.showCoords = true;
@@ -221,15 +221,17 @@ class GoScene extends Phaser.Scene {
     this.scoreResult = null;
     this.busy = false;
 
-    // 图层顺序：棋盘 → 领地标记 → 棋子 → 最后一手标记 → 悬停预览 → 坐标号
-    this.boardGfx = this.add.graphics();
-    this.territoryGfx = this.add.graphics();
-    this.stoneLayer = this.add.container(0, 0);
-    this.markerGfx = this.add.graphics();
-    this.hoverGfx = this.add.graphics();
+    // 图层用 setDepth 显式分层，顺序不再依赖创建先后
+    //   0 棋盘(静态)  1 领地  2 棋子  3 最后一手标记  4 悬停预览  5 坐标号
+    this.boardGfx     = this.add.graphics().setDepth(0);
+    this.territoryGfx = this.add.graphics().setDepth(1);
+    this.stoneLayer   = this.add.container(0, 0).setDepth(2);
+    this.markerGfx    = this.add.graphics().setDepth(3);
+    this.hoverGfx     = this.add.graphics().setDepth(4);
 
+    this.drawBoard();      // 静态棋盘：整个场景生命周期只画一次，新对局不再重画
     this.newGame();
-    this.createLabels();
+    this.createLabels();   // depth 5
 
     this.input.on('pointerdown', p => {
       const pt = this.pointFromPixel(p.x, p.y);
@@ -240,12 +242,7 @@ class GoScene extends Phaser.Scene {
     this.input.on('pointermove', p => this.handleHover(p.x, p.y));
 
     window.__scene = this;
-
-    // 人机模式且电脑执黑时，电脑先走
-    if (this.mode !== 'pvp' && this.turn === this.aiColor()) {
-      this.busy = true; this.refresh();
-      this.time.delayedCall(500, () => { this.busy = false; this.aiMove(); });
-    }
+    this.maybeAiFirst();
   }
 
   /* ---------- 坐标换算 ---------- */
@@ -372,6 +369,14 @@ class GoScene extends Phaser.Scene {
     }
   }
 
+  // 人机模式且电脑该走时（新对局/切换模式后）先让电脑落子
+  maybeAiFirst() {
+    if (this.mode !== 'pvp' && !this.gameOver && this.turn === this.aiColor()) {
+      this.busy = true; this.refresh();
+      this.time.delayedCall(450, () => { this.busy = false; this.aiMove(); });
+    }
+  }
+
   undo() {
     if (!this.history.length) { sfx.deny(); return this.flash('没有可悔的棋'); }
     const target = this.mode === 'pvp' ? null : this.humanColor();
@@ -495,6 +500,7 @@ class GoScene extends Phaser.Scene {
   }
 
   /* ---------- 绘制 ---------- */
+  // 只重置对局状态与动态图层；棋盘图层 boardGfx 完全不动
   newGame() {
     const n = this.n;
     this.board = Array.from({ length: n }, () => Array(n).fill(EMPTY));
@@ -509,17 +515,29 @@ class GoScene extends Phaser.Scene {
     this.busy = false;
     this.scoreResult = null;
     this.showTerritory = false;
+    this.tweens.killAll();                 // 清掉残留的提子缩放动画
     this.stoneLayer.removeAll(true);
     this.territoryGfx.clear();
+    this.markerGfx.clear();
     this.hoverGfx.clear();
-    this.drawBoard();
-    this.drawMarker();
-    this.refresh();
     document.getElementById('btnTerritory').textContent = '显示领地';
+    this.refresh();
+  }
+
+  // 切换棋盘大小：销毁并重建棋盘图层与坐标号（全新对象，不依赖 clear 后重画）
+  rebuildForSize(size) {
+    this.n = size;
+    this.margin = (GAME_SIZE - (size - 1) * this.cell) / 2;
+    this.radius = this.cell * 0.45;
+    if (this.boardGfx) this.boardGfx.destroy();
+    this.boardGfx = this.add.graphics().setDepth(0);
+    this.drawBoard();
+    this.createLabels();
+    this.newGame();
   }
 
   drawBoard() {
-    const g = this.boardGfx, n = this.n, m = this.margin, c = this.cell, f = FRAME_PAD;
+    const g = this.boardGfx, n = this.n, m = this.margin, c = this.cell, f = FRAME_PAD, h = HALF;
     const x0 = m - f, y0 = m - f, size = (n - 1) * c + f * 2;   // 木框矩形
     g.clear();
 
@@ -533,18 +551,18 @@ class GoScene extends Phaser.Scene {
     g.lineStyle(3, 0x6b4a1f, 1);
     g.strokeRoundedRect(x0, y0, size, size, 8);
     g.lineStyle(1, 0xf2dcb0, 0.5);
-    g.strokeRoundedRect(x0 + 3, y0 + 3, size - 6, size - 6, 6);
+    g.strokeRoundedRect(x0 + 3.5, y0 + 3.5, size - 7, size - 7, 6);
 
-    // 网格线：从第一条到最外一条，完整闭合
+    // 网格线：从第一条到最外一条，完整闭合；+0.5 让 1px 线正好覆盖整像素
     g.lineStyle(1, 0x5a3d17, 1);
     for (let i = 0; i < n; i++) {
-      g.lineBetween(m, m + i * c, m + (n - 1) * c, m + i * c);   // 横线
-      g.lineBetween(m + i * c, m, m + i * c, m + (n - 1) * c);   // 纵线
+      g.lineBetween(m + h, m + i * c + h, m + (n - 1) * c + h, m + i * c + h);   // 横线
+      g.lineBetween(m + i * c + h, m + h, m + i * c + h, m + (n - 1) * c + h);   // 纵线
     }
 
     // 星位
     g.fillStyle(0x3a2410, 1);
-    for (const [r, cc] of starPoints(n)) g.fillCircle(m + cc * c, m + r * c, c * 0.11);
+    for (const [r, cc] of starPoints(n)) g.fillCircle(m + cc * c + h, m + r * c + h, c * 0.11);
   }
 
   createLabels() {
@@ -555,10 +573,10 @@ class GoScene extends Phaser.Scene {
     for (let i = 0; i < n; i++) {
       const colLabel = COLS[i], rowLabel = String(n - i);
       this.coordTexts.push(
-        this.add.text(m + i * c, m - L, colLabel, st).setOrigin(0.5),                    // 上
-        this.add.text(m + i * c, m + (n - 1) * c + L, colLabel, st).setOrigin(0.5),      // 下
-        this.add.text(m - L, m + i * c, rowLabel, st).setOrigin(0.5),                    // 左
-        this.add.text(m + (n - 1) * c + L, m + i * c, rowLabel, st).setOrigin(0.5)       // 右
+        this.add.text(m + i * c, m - L, colLabel, st).setOrigin(0.5).setDepth(5),                // 上
+        this.add.text(m + i * c, m + (n - 1) * c + L, colLabel, st).setOrigin(0.5).setDepth(5),  // 下
+        this.add.text(m - L, m + i * c, rowLabel, st).setOrigin(0.5).setDepth(5),                // 左
+        this.add.text(m + (n - 1) * c + L, m + i * c, rowLabel, st).setOrigin(0.5).setDepth(5)   // 右
       );
     }
     this.coordTexts.forEach(t => t.setVisible(this.showCoords));
@@ -673,10 +691,11 @@ class GoScene extends Phaser.Scene {
 
   startNewGame() {
     const size = parseInt(document.getElementById('selSize').value, 10);
-    if (size !== this.n) { boardSize = size; this.scene.restart({ size }); }
-    else { this.mode = document.getElementById('selMode').value; this.newGame(); }
+    if (size !== this.n) this.rebuildForSize(size);                       // 换大小：重建棋盘
+    else { this.mode = document.getElementById('selMode').value; this.newGame(); }  // 同大小：只重置对局
     sfx.start();
-    this.flash(`新对局：${size} 路棋盘`);
+    this.flash(`新对局：${this.n} 路棋盘`);
+    this.maybeAiFirst();
   }
 }
 
