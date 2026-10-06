@@ -5,158 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>坦克大战 · Phaser 3</title>
 <style>
-  html,body{margin:0;padding:0;width:100%;height:100%;background:#0d0d0d;overflow:hidden;
-            color:#e6edf3;font-family:"Courier New",monospace}
+  html,body{margin:0;padding:0;width:100%;height:100%;background:#0d0d0d;overflow:hidden}
+  /* 父容器只提供明确尺寸，居中交给 Phaser 的 CENTER_BOTH */
   #game{width:100vw;height:100vh}
   #game canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none}
-  #boot{position:fixed;left:0;top:0;right:0;bottom:0;z-index:50;display:flex;flex-direction:column;
-        align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box}
-  #boot h1{color:#ffd23f;font-size:30px;letter-spacing:3px;margin:0 0 14px}
-  #boot-status{font-size:15px;color:#9fb3c0;margin:0}
-  /* 步骤日志：定位"卡在哪一步"的关键 */
-  #steplog{position:fixed;left:10px;bottom:8px;z-index:60;max-width:92vw;font-size:12px;line-height:1.5;
-           color:#8fe96a;background:rgba(0,0,0,.55);padding:5px 9px;border-radius:4px;
-           pointer-events:none;transition:opacity .6s}
-  #dbg{position:fixed;right:8px;top:6px;z-index:60;font-size:11px;color:#4a5a66;pointer-events:none}
-  #diag{position:fixed;left:0;top:0;right:0;bottom:0;z-index:99;display:none;background:#14181d;
-        padding:28px 32px;box-sizing:border-box;overflow:auto}
-  #diag h2{color:#ff6b6b;font-size:20px;margin:0 0 12px}
-  #diag pre{background:#000;border:1px solid #333;border-radius:6px;padding:12px;font-size:13px;
-            line-height:1.6;white-space:pre-wrap;word-break:break-all;color:#9fe8a0}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 </head>
 <body>
 <div id="game"></div>
-<div id="dbg"></div>
-<div id="steplog">启动中…</div>
-
-<div id="boot">
-  <h1>TANK BATTLE</h1>
-  <p id="boot-status">正在加载游戏引擎…</p>
-</div>
-
-<div id="diag"></div>
-
 <script>
 (function(){
   'use strict';
-
-  var bootEl   = document.getElementById('boot');
-  var statusEl = document.getElementById('boot-status');
-  var diagEl   = document.getElementById('diag');
-  var dbgEl    = document.getElementById('dbg');
-  var logEl    = document.getElementById('steplog');
-  var game     = null;
-
-  /* 兼容旧浏览器 */
-  var QS = (typeof URLSearchParams !== 'undefined')
-    ? new URLSearchParams(location.search) : {get:function(){return null;}};
-  var forceCanvas = QS.get('renderer') === 'canvas';
-
-  var STEPS = [];
-  function logStep(s){
-    STEPS.push(s);
-    if(logEl) logEl.textContent = STEPS.join(' › ');
-    try{ console.log('[tank] ' + s); }catch(e){}
-  }
-  logStep('页面脚本开始执行');
-
-  function showError(title, detail){
-    if(bootEl) bootEl.style.display = 'none';
-    diagEl.innerHTML = '<h2>\u26a0 ' + title + '</h2><pre>' + String(detail) + '</pre>' +
-      '<p style="color:#9fb3c0;font-size:13px;line-height:1.8">请把这个画面截图发给助手，即可定位问题。</p>';
-    diagEl.style.display = 'block';
-    logStep('!! ' + title);
-  }
-
-  window.addEventListener('error', function(e){
-    showError('页面脚本出错',
-      (e.message || '未知错误') + '\n位置：' + (e.filename || '?') + ' : 第 ' + (e.lineno || 0) + ' 行');
-  });
 
   var CDNS = [
     'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js',
     'https://unpkg.com/phaser@3.80.1/dist/phaser.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js',
     'https://fastly.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js',
-    './phaser.min.js'
+    './phaser.min.js'   /* 本地回退：把 phaser.min.js 放到同目录即可 */
   ];
-  var idx = 0, tried = [];
+  var idx = 0;
+
+  window.addEventListener('error', function(e){
+    document.body.innerHTML =
+      '<pre style="color:#ff6b6b;background:#111;padding:24px;font:14px/1.7 monospace;white-space:pre-wrap">' +
+      '页面出错：' + (e.message || '未知错误') + '\n位置：' + (e.filename || '?') +
+      ' : 第 ' + (e.lineno || 0) + ' 行</pre>';
+  });
 
   function loadNext(){
     if(idx >= CDNS.length){
-      showError('Phaser 引擎加载失败（所有来源都连不上）',
-        '已依次尝试：\n  ' + tried.join('\n  ') +
-        '\n\n浏览器：' + navigator.userAgent);
+      document.body.innerHTML =
+        '<pre style="color:#ff6b6b;background:#111;padding:24px;font:14px/1.7 monospace;white-space:pre-wrap">' +
+        'Phaser 引擎加载失败，请检查网络后按 Ctrl+F5 刷新；\n' +
+        '或下载 phaser.min.js 放到本文件同目录。</pre>';
       return;
     }
-    var url = CDNS[idx++];
-    tried.push(url);
     var s = document.createElement('script');
-    s.src = url;
-    s.onload  = function(){ if(window.Phaser){ logStep('引擎加载成功'); boot(); } else { loadNext(); } };
-    s.onerror = function(){ loadNext(); };
+    s.src = CDNS[idx++];
+    s.onload  = function(){ if(window.Phaser) launch(); else loadNext(); };
+    s.onerror = loadNext;
     document.head.appendChild(s);
   }
 
-  function boot(){
-    try{
-      statusEl.textContent = '引擎就绪，正在生成贴图…';
-      launchGame();
-    }catch(err){
-      showError('游戏启动失败',
-        (err && err.message ? err.message : String(err)) + '\n\n' + (err && err.stack ? err.stack : ''));
-      return;
+  function launch(){
+    try{ startGame(); }
+    catch(err){
+      document.body.innerHTML =
+        '<pre style="color:#ff6b6b;background:#111;padding:24px;font:14px/1.7 monospace;white-space:pre-wrap">' +
+        '启动失败：' + (err && err.message ? err.message : err) + '\n\n' + (err && err.stack ? err.stack : '') + '</pre>';
     }
-    setTimeout(function(){
-      var c = document.querySelector('#game canvas');
-      logStep('canvas 检查：' + (c ? (c.width + 'x' + c.height) : '未找到'));
-      if(!c){ showError('画布没有创建', 'Phaser 已加载，但页面上找不到 canvas 元素'); return; }
-      if(dbgEl && window.Phaser){
-        dbgEl.textContent = 'Phaser v' + Phaser.VERSION + ' · ' +
-          (game && game.renderer ? (game.renderer.type === Phaser.WEBGL ? 'WEBGL' : 'CANVAS') : '?') +
-          (forceCanvas ? ' (强制CANVAS)' : '');
-      }
-      bootEl.style.display = 'none';
-    }, 300);
-
-    /* 看门狗：3 秒内没进入菜单界面就把步骤日志摊开 */
-    setTimeout(function(){
-      if(STEPS.indexOf('菜单场景已创建') < 0){
-        showError('游戏未能进入菜单界面（渲染流程中断）',
-          '已完成的步骤：\n  ' + STEPS.join('\n  ') +
-          '\n\n渲染器：' + (game && game.renderer ? (game.renderer.type === Phaser.WEBGL ? 'WEBGL' : 'CANVAS') : '未知') +
-          '\n\n常见原因：\n' +
-          '1. 显卡驱动 / WebGL 被禁用（虚拟机、远程桌面、老旧核显）\n' +
-          '   → 在网址后面加上 ?renderer=canvas 再试\n' +
-          '2. 广告拦截插件拦截了页面内部行为 → 先禁用插件\n' +
-          '3. 浏览器禁用了硬件加速 → 设置里重新开启');
-      }else{
-        /* 一切正常，淡出调试信息 */
-        if(logEl) logEl.style.opacity = '0';
-      }
-    }, 3000);
   }
 
   /* =========================================================
      游戏本体
      ========================================================= */
-  function launchGame(){
+  function startGame(){
 
+    /* ---------------- 基础常量 ---------------- */
     const TILE = 32, COLS = 13, ROWS = 13;
     const MAP_W = COLS * TILE, MAP_H = ROWS * TILE;
     const PANEL_W = 208;
     const MARGIN  = 8;
-    const MAP_X = MARGIN + PANEL_W + MARGIN;
-    const MAP_Y = MARGIN + 16;
-    const W = MAP_X + MAP_W + MARGIN;      // 648
+    const MAP_X = MARGIN + PANEL_W + MARGIN;   // = 224
+    const MAP_Y = MARGIN + 16;                 // = 24
+    const W = MAP_X + MAP_W + MARGIN;          // = 648
     const H = 480;
     const TANK_SIZE = 28;
+
+    /* 渲染层级：地形(2) < 子弹(8) < 坦克(10) < 树林(15) < 特效(16~20) < 文字(30) < UI(100) */
+    const DEPTH = {
+      TERRAIN: 2, BULLET: 8, TANK: 10, TREE: 15,
+      DEBRIS: 16, SPAWN: 18, SHIELD: 18, POWERUP: 18,
+      EXPLOSION: 20, TEXT: 30, OVERLAY: 100
+    };
+
     const EMPTY = 0, BRICK = 1, STEEL = 2, WATER = 3, TREE = 4, BASE = 5;
-    const DIRS = [{x:0,y:-1},{x:0,y:1},{x:-1,y:0},{x:1,y:0}];
+    const DIRS = [{x:0,y:-1},{x:0,y:1},{x:-1,y:0},{x:1,y:0}];   // 0上 1下 2左 3右
     const BULLET_ANG = [-90, 90, 180, 0];
     const SOLID_TANK   = new Set([BRICK, STEEL, WATER, BASE]);
-    const SOLID_BULLET = new Set([BRICK, STEEL, BASE]);
+    const SOLID_BULLET = new Set([BRICK, STEEL, BASE]);   // 树林不挡子弹
     const MONO = '"Courier New",monospace';
 
     const PLAYER_COLORS = {body:0xe6c93f, dark:0x8a6f14, light:0xf8e9a0};
@@ -173,9 +102,13 @@
       armor:{speed:62, bulletSpeed:225, maxBullets:1, hp:4, score:400, colors:{body:0xcfcdc4,dark:0x7e7c74,light:0xefeee6}}
     };
 
+    /* 地图图例：. 空  # 砖  @ 钢  ~ 水  T 树林  B 基地  P 玩家出生点
+       约定：① 基地位居第 11 行，8 个相邻格全是砖墙（完整护罩）
+            ② 玩家出生点在第 12 行，不与任何墙重叠
+            ③ 三个敌军出生点 (0,0)(6,0)(12,0) 必须是 '.'          */
     const STAGE_MAPS = [
       [
-        '.............',
+        '.............',   // 0  敌军出生点所在行
         '..###...###..',
         '..###...###..',
         '..###...###..',
@@ -185,9 +118,9 @@
         '.@.#######.@.',
         '....##.##....',
         '..###...###..',
-        '..###.#.###..',
-        '..###.#####..',
-        '...P.#B#.....'
+        '.....###.....',   // 10 基地上排护罩
+        '.....#B#.....',   // 11 基地 + 左右护罩
+        '....P###.....'    // 12 玩家出生点 + 基地下排护罩
       ],
       [
         '.............',
@@ -200,9 +133,9 @@
         '.##.#####.##.',
         '....##.##....',
         '.@..#####..@.',
-        '....##.##....',
-        '..###.#####..',
-        '...P.#B#.....'
+        '.....###.....',
+        '.....#B#.....',
+        '....P###.....'
       ],
       [
         '.............',
@@ -215,13 +148,13 @@
         '...#######...',
         '@@.#######.@@',
         '..##..T..##..',
-        '..###.#.###..',
-        '..###.#####..',
-        '...P.#B#.....'
+        '.....###.....',
+        '.....#B#.....',
+        '....P###.....'
       ]
     ];
 
-    /* ---------------- 音效 ---------------- */
+    /* ---------------- 音效（WebAudio 合成） ---------------- */
     const SFX = {
       ctx:null, enabled:true,
       init(){
@@ -257,7 +190,7 @@
       },
       shoot(){ this.tone(540,0.07,'square',0.045,-300); },
       brick(){ this.noise(0.13,0.12,1400); },
-      clang(){ this.tone(1250,0.05,'square',0.035); this.tone(880,0.08,'square',0.03); },
+      clang(){ this.tone(1250,0.06,'square',0.04); this.tone(880,0.09,'square',0.03); },
       spark(){ this.tone(1500,0.04,'square',0.03,-600); },
       explode(big){ this.noise(big?0.5:0.28, big?0.24:0.15, big?600:1000); this.tone(big?85:150,0.3,'sawtooth',0.06,-60); },
       hit(){ this.tone(300,0.06,'square',0.05); },
@@ -267,10 +200,10 @@
       over(){ [392,330,262,196].forEach((f,i)=>setTimeout(()=>this.tone(f,0.28,'triangle',0.07), i*190)); }
     };
 
-    /* ---------------- 贴图生成 ---------------- */
-    const TANK_ROT = [-Math.PI/2, Math.PI/2, Math.PI, 0];
+    /* ---------------- 贴图生成（Graphics → generateTexture） ---------------- */
+    const TANK_ROT = [-Math.PI/2, Math.PI/2, Math.PI, 0];   // 上 下 左 右
 
-    /* 用 make（不加入显示列表）创建离屏 Graphics，再烘成纹理 */
+    /* make 创建的 Graphics 不进入显示列表，纯粹用来"画完拍照" */
     function bake(scene, key, w, h, fn){
       if(scene.textures.exists(key)) scene.textures.remove(key);
       const g = scene.make.graphics({ x: 0, y: 0 }, false);
@@ -280,17 +213,21 @@
     }
 
     function drawTankRight(g, frame, col){
+      // 履带
       g.fillStyle(col.dark, 1);
       g.fillRect(3, 3, 26, 6);
       g.fillRect(3, 23, 26, 6);
+      // 履带纹（两帧交替 -> 滚动感）
       g.fillStyle(0x000000, 0.38);
       for(let i=0;i<6;i++){
         const x = 4 + i*4 + (frame ? 2 : 0);
         if(x < 28){ g.fillRect(x, 4, 2, 4); g.fillRect(x, 24, 2, 4); }
       }
+      // 车身
       g.fillStyle(col.dark, 1);   g.fillRect(5, 7, 22, 18);
       g.fillStyle(col.body, 1);   g.fillRect(6, 8, 20, 16);
       g.fillStyle(col.light, 1);  g.fillRect(8, 10, 16, 4);
+      // 炮塔 + 炮管
       g.fillStyle(col.dark, 1);   g.fillCircle(16, 16, 6);
       g.fillStyle(col.light, 1);  g.fillCircle(16, 16, 4.4);
       g.fillStyle(col.light, 1);  g.fillRect(16, 14, 13, 4);
@@ -308,18 +245,34 @@
 
     function generateTextures(scene){
       const tex = scene.textures;
-      logStep('开始生成贴图');
 
+      /* ================= 砖块 =================
+         每行高 8、砖高 6（上下各留 1px 当砖缝）
+         第 1、3 行：两块主砖（宽 14），左右各留 1px
+         第 2、4 行：两端小砖直接顶住画布边界（边界侧无缝），
+                     中间两道砖缝都统一为 2px，左右对称
+         ---------------------------------------------------- */
       bake(scene,'brick',32,32,(g)=>{
-        g.fillStyle(0x3a2210, 1); g.fillRect(0,0,32,32);
-        for(let r=0;r<4;r++){
-          const off = (r%2) ? 8 : 0;
-          for(let i=0;i<2;i++){
-            g.fillStyle(0xb5622c, 1); g.fillRect(off+i*16+1, r*8+1, 14, 6);
-            g.fillStyle(0xd98a4a, 1); g.fillRect(off+i*16+1, r*8+1, 14, 2);
+        // ① 先铺深色底 = 砖缝（水泥）
+        g.fillStyle(0x3a2210, 1);
+        g.fillRect(0, 0, 32, 32);
+
+        for(let r = 0; r < 4; r++){
+          const y = r*8 + 1;                  // 本行砖顶
+
+          // [x, 宽] 列表
+          const list = (r % 2 === 0)
+            ? [[1, 14], [17, 14]]             // 第 1、3 行：左右各留 1px
+            : [[0, 8], [10, 14], [26, 6]];    // 第 2、4 行：贴边 + 两道 2px 砖缝
+
+          for(let i = 0; i < list.length; i++){
+            const x = list[i][0], w = list[i][1];
+            g.fillStyle(0xb5622c, 1);  g.fillRect(x, y, w, 6);   // 砖体
+            g.fillStyle(0xd98a4a, 1);  g.fillRect(x, y, w, 2);   // 顶部高光
           }
         }
       });
+
       bake(scene,'steel',32,32,(g)=>{
         g.fillStyle(0x4b525a, 1); g.fillRect(0,0,32,32);
         const pts = [[2,2],[17,2],[2,17],[17,17]];
@@ -375,6 +328,7 @@
         g.fillStyle(0xffffff, 0.32); g.fillCircle(4, 4, 4);
         g.fillStyle(0xffffff, 1);    g.fillCircle(4, 4, 2.4);
       });
+      // 坦克：玩家 + 4 种敌人 × 4 方向 × 2 帧
       const types = {player:PLAYER_COLORS};
       for(const k in ENEMY_TYPES) types[k] = ENEMY_TYPES[k].colors;
       for(const t in types){
@@ -384,6 +338,7 @@
           });
         }
       }
+      // 出生动画
       for(let i=0;i<4;i++){
         bake(scene,'spawn'+i,32,32,(g)=>{
           g.lineStyle(3, (i%2) ? 0xffffff : 0x8fe9ff, 1);
@@ -397,6 +352,7 @@
           }
         });
       }
+      // 护盾
       for(let i=0;i<2;i++){
         bake(scene,'shield'+i,32,32,(g)=>{
           g.lineStyle(2, 0x7fe3ff, 1);
@@ -410,6 +366,7 @@
           g.strokeCircle(16, 16, 15);
         });
       }
+      // 爆炸三帧
       const expSizes = [['exp0',18],['exp1',30],['exp2',46]];
       for(const e of expSizes){
         const size = e[1], r = size/2;
@@ -419,6 +376,7 @@
           g.fillStyle(0xfff3c4, 1); g.fillCircle(r, r, r*0.4);
         });
       }
+      // 道具图标
       bake(scene,'pu_star',24,24,(g)=>{
         const pts = [];
         for(let i=0;i<10;i++){
@@ -455,13 +413,14 @@
         g.fillStyle(0x2b3a4a, 1); g.fillRect(10, 1, 4, 3);
       });
 
+      // 自检 + 兜底贴图
       const NEED = ['brick','steel','water0','water1','tree','base','base_dead','bullet',
                     'spawn0','spawn1','spawn2','spawn3','shield0','shield1',
                     'exp0','exp1','exp2','pu_star','pu_tank','pu_grenade','pu_shovel','pu_timer'];
       for(const k in types) for(let d=0;d<4;d++) for(let f=0;f<2;f++) NEED.push('tank_'+k+'_'+d+'_'+f);
       const missing = NEED.filter(k => !tex.exists(k));
       if(missing.length){
-        logStep('!! 缺贴图 ' + missing.length + ' 张，使用兜底图');
+        console.warn('[tank] 兜底生成缺失贴图：', missing);
         for(const k of missing){
           bake(scene, k, 32, 32, (g)=>{
             g.fillStyle(0xff00ff, 1); g.fillRect(0, 0, 32, 32);
@@ -469,7 +428,6 @@
           });
         }
       }
-      logStep('贴图生成完成');
     }
 
     /* ---------------- 坦克 ---------------- */
@@ -491,7 +449,8 @@
 
         this.x = MAP_X + col*TILE + TILE/2;
         this.y = MAP_Y + row*TILE + TILE/2;
-        this.sprite = scene.add.sprite(this.x, this.y, this.texKey(0)).setDepth(10).setVisible(false);
+        this.sprite = scene.add.sprite(this.x, this.y, this.texKey(0))
+                          .setDepth(DEPTH.TANK).setVisible(false);
         this.moving = false;
         this.dead = false;
         this.spawning = true;
@@ -506,10 +465,12 @@
         this.bulletCount = 0;
         this.bonus = false;
 
-        this.spawnFx = scene.add.sprite(this.x, this.y, 'spawn0').setDepth(11);
+        this.spawnFx = scene.add.sprite(this.x, this.y, 'spawn0').setDepth(DEPTH.SPAWN);
         this.spawnTween = scene.tweens.add({targets:this.spawnFx, angle:360, duration:900, repeat:-1});
       }
       texKey(f){ return 'tank_'+this.type+'_'+this.dir+'_'+f; }
+
+      /* 转向时把"垂直于前进方向"的坐标吸附到格子中心线，避免卡在两格之间 */
       snap(v){ return MAP_X + Math.round((v - MAP_X - TILE/2)/TILE)*TILE + TILE/2; }
       snapY(v){ return MAP_Y + Math.round((v - MAP_Y - TILE/2)/TILE)*TILE + TILE/2; }
 
@@ -539,7 +500,7 @@
         this.moving = true;
       }
       updateShieldFx(){
-        if(!this.shieldFx){ this.shieldFx = this.scene.add.sprite(this.x, this.y, 'shield0').setDepth(12); }
+        if(!this.shieldFx){ this.shieldFx = this.scene.add.sprite(this.x, this.y, 'shield0').setDepth(DEPTH.SHIELD); }
         this.shieldFx.setPosition(this.x, this.y);
         this.shieldFx.setTexture('shield' + (Math.floor(this.scene.time.now/70)%2));
       }
@@ -572,6 +533,7 @@
         if(this.animT > 0.085 && this.moving){ this.animT = 0; this.frame ^= 1; }
         this.sprite.setTexture(this.texKey(this.frame));
 
+        // 重甲坦克血量变色
         if(this.type === 'armor' && !this.isPlayer){
           const ratio = this.hp/this.maxHp;
           const tint = ratio > 0.75 ? 0x9adc6a : ratio > 0.5 ? 0xf2e04a : ratio > 0.25 ? 0xf09a4a : 0xe85a4a;
@@ -608,12 +570,13 @@
         this.dead = false;
         this.vx = DIRS[dir].x*speed;
         this.vy = DIRS[dir].y*speed;
-        this.sprite = scene.add.sprite(x, y, 'bullet').setDepth(8).setAngle(BULLET_ANG[dir]);
+        this.sprite = scene.add.sprite(x, y, 'bullet')
+                          .setDepth(DEPTH.BULLET).setAngle(BULLET_ANG[dir]);
         owner.bulletCount++;
       }
       update(dt){
         const dist = Math.hypot(this.vx, this.vy)*dt;
-        const steps = Math.max(1, Math.ceil(dist/4));
+        const steps = Math.max(1, Math.ceil(dist/4));   // 分步推进，避免高速穿墙
         for(let i=0;i<steps;i++){
           this.x += this.vx*dt/steps;
           this.y += this.vy*dt/steps;
@@ -623,12 +586,29 @@
       }
       checkHit(){
         const s = this.scene;
-        if(this.x < MAP_X-4 || this.x > MAP_X+MAP_W+4 || this.y < MAP_Y-4 || this.y > MAP_Y+MAP_H+4) return true;
+
+        // ① 打出地图边界 -> 在边界处放一朵火花
+        if(this.x < MAP_X || this.x > MAP_X+MAP_W ||
+           this.y < MAP_Y || this.y > MAP_Y+MAP_H){
+          s.sparkAt(
+            Phaser.Math.Clamp(this.x, MAP_X+3, MAP_X+MAP_W-3),
+            Phaser.Math.Clamp(this.y, MAP_Y+3, MAP_Y+MAP_H-3)
+          );
+          return true;
+        }
+
+        // ② 敌我子弹对撞
         for(const b of s.bullets){
           if(b === this || b.dead) continue;
           if(b.owner.isPlayer !== this.owner.isPlayer &&
-             Math.abs(b.x-this.x) < 8 && Math.abs(b.y-this.y) < 8){ b.kill(); return true; }
+             Math.abs(b.x-this.x) < 8 && Math.abs(b.y-this.y) < 8){
+            b.kill();
+            s.sparkAt(this.x, this.y);
+            return true;
+          }
         }
+
+        // ③ 命中坦克
         if(this.owner.isPlayer){
           for(const e of s.enemies){
             if(e.dead || e.spawning) continue;
@@ -640,12 +620,22 @@
             s.hitPlayer(this); return true;
           }
         }
+
+        // ④ 命中地形
         const c = Math.floor((this.x-MAP_X)/TILE), r = Math.floor((this.y-MAP_Y)/TILE);
         const t = s.cellAt(c, r);
         if(SOLID_BULLET.has(t)){
-          if(t === STEEL && !this.power){ SFX.clang(); return true; }
+          if(t === STEEL){
+            if(this.power){
+              s.destroyCell(c, r, true);        // 3 级弹：钢墙被打碎
+            }else{
+              s.sparkAt(this.x, this.y);        // 低级弹：只有火花
+              SFX.clang();
+            }
+            return true;
+          }
           if(t === BASE){ s.destroyBase(); return true; }
-          s.destroyCell(c, r);
+          s.destroyCell(c, r, false);           // 砖墙：碎块 + 爆炸
           return true;
         }
         return false;
@@ -658,17 +648,16 @@
       }
     }
 
-    /* ---------------- 场景 ---------------- */
+    /* ---------------- 启动场景 ---------------- */
     class BootScene extends Phaser.Scene{
       constructor(){ super('Boot'); }
       create(){
-        logStep('Boot 场景已创建');
         generateTextures(this);
-        logStep('准备切换到菜单');
         this.scene.start('Menu');
       }
     }
 
+    /* ---------------- 菜单场景 ---------------- */
     class MenuScene extends Phaser.Scene{
       constructor(){ super('Menu'); }
       create(){
@@ -698,11 +687,10 @@
         this.input.keyboard.on('keydown-ENTER', go);
         this.input.keyboard.on('keydown-SPACE', go);
         this.input.on('pointerdown', go);
-
-        logStep('菜单场景已创建');
       }
     }
 
+    /* ---------------- 主游戏场景 ---------------- */
     class GameScene extends Phaser.Scene{
       constructor(){ super('Game'); }
 
@@ -726,9 +714,9 @@
         this.bindInput();
         this.buildTouch();
         this.startStage(this.stageNum);
-        logStep('关卡 ' + this.stageNum + ' 已创建');
       }
 
+      /* ---------- 左侧信息面板 ---------- */
       buildPanel(){
         const g = this.add.graphics();
         g.fillStyle(0x6e6e6e, 1); g.fillRect(0, 0, PANEL_W, H);
@@ -757,11 +745,12 @@
       }
 
       buildOverlay(){
-        this.ovBg = this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.78).setDepth(100).setVisible(false);
+        // rectangle 的 (x,y) 是中心点，必须传画布中心才能铺满全屏
+        this.ovBg = this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.78).setDepth(DEPTH.OVERLAY).setVisible(false);
         this.ovTitle = this.add.text(W/2, H/2-28, '', {fontFamily:MONO, fontSize:'44px', color:'#ffd23f'})
-          .setOrigin(0.5).setDepth(101).setVisible(false);
+          .setOrigin(0.5).setDepth(DEPTH.OVERLAY+1).setVisible(false);
         this.ovSub = this.add.text(W/2, H/2+28, '', {fontFamily:MONO, fontSize:'17px', color:'#ffffff'})
-          .setOrigin(0.5).setDepth(101).setVisible(false);
+          .setOrigin(0.5).setDepth(DEPTH.OVERLAY+1).setVisible(false);
       }
       showOverlay(t, s){
         this.ovTitle.setText(t).setVisible(true);
@@ -800,6 +789,7 @@
         mk(600, 462, 'FIRE', 'fire');
       }
 
+      /* ---------- 关卡构建 ---------- */
       startStage(n){
         this.clearField();
         this.stageNum = n;
@@ -834,11 +824,13 @@
           }
         }
         this.playerSpawn = spawn;
+
+        /* 记录基地外围 8 格及其原始类型（铁锹道具会用到） */
         this.baseCells = [];
         for(let dr=-1; dr<=1; dr++) for(let dc=-1; dc<=1; dc++){
           if(!dr && !dc) continue;
           const c = this.baseCol+dc, r = this.baseRow+dr;
-          if(this.cellAt(c, r) === BRICK) this.baseCells.push({c, r});
+          this.baseCells.push({c:c, r:r, orig:this.cellAt(c, r)});
         }
 
         this.playerLevel = 0;
@@ -860,9 +852,13 @@
         const x = MAP_X + c*TILE + TILE/2, y = MAP_Y + r*TILE + TILE/2;
         const key = t === BRICK ? 'brick' : t === STEEL ? 'steel' : t === WATER ? 'water0'
                  : t === TREE ? 'tree' : t === BASE ? 'base' : null;
-        const sp = this.add.image(x, y, key).setDepth(t === TREE ? 4 : 2);
+        if(!key) return null;
+        // 树林层级高于坦克：坦克从树下穿过时被树冠遮住
+        const depth = t === TREE ? DEPTH.TREE : DEPTH.TERRAIN;
+        const sp = this.add.image(x, y, key).setDepth(depth);
         this.tileSprites[r][c] = sp;
         if(t === WATER) this.waterSprites.push(sp);
+        return sp;
       }
 
       clearField(){
@@ -896,8 +892,9 @@
         return q;
       }
 
+      /* ---------- 工具 ---------- */
       cellAt(c, r){
-        if(c < 0 || r < 0 || c >= COLS || r >= ROWS) return STEEL;
+        if(c < 0 || r < 0 || c >= COLS || r >= ROWS) return STEEL;   // 地图外视为钢墙
         return this.map[r][c];
       }
       tanks(){
@@ -914,44 +911,62 @@
         this.bullets.push(new Bullet(this, x, y, dir, speed, owner, power));
       }
 
-      destroyCell(c, r){
+      /* ---------- 特效 ---------- */
+      /* 小火花：子弹打边界 / 打钢墙 / 子弹对撞时播放 */
+      sparkAt(x, y){
+        const sp = this.add.image(x, y, 'exp0').setDepth(DEPTH.EXPLOSION);
+        this.tweens.add({
+          targets: sp,
+          scale: {from: 0.45, to: 0.85},
+          alpha: {from: 1, to: 0},
+          duration: 220,
+          onComplete: ()=>sp.destroy()
+        });
+        SFX.spark();
+      }
+      /* 大 / 中爆炸 */
+      explosion(x, y, size){
+        const key = size === 2 ? 'exp2' : size === 1 ? 'exp1' : 'exp0';
+        const sp = this.add.image(x, y, key).setDepth(DEPTH.EXPLOSION);
+        this.tweens.add({
+          targets: sp,
+          scale: {from: 0.5, to: size === 2 ? 1.9 : 1.25},
+          alpha: {from: 1, to: 0},
+          duration: size === 2 ? 620 : 400,
+          onComplete: ()=>sp.destroy()
+        });
+        SFX.explode(size === 2);
+      }
+      /* 碎块：砖墙碎砖 / 钢墙碎钢 */
+      debris(x, y, isSteel){
+        const color = isSteel ? 0xc9d3dc : 0xb5622c;
+        for(let i=0;i<7;i++){
+          const p = this.add.rectangle(x, y, 4, 4, color).setDepth(DEPTH.DEBRIS);
+          const a = Math.random()*Math.PI*2, d = 8 + Math.random()*16;
+          this.tweens.add({
+            targets: p, x:x+Math.cos(a)*d, y:y+Math.sin(a)*d,
+            alpha: 0, duration: 260+Math.random()*180,
+            onComplete: ()=>p.destroy()
+          });
+        }
+        if(isSteel) SFX.clang(); else SFX.brick();
+      }
+      floatText(x, y, str, color){
+        const t = this.add.text(x, y, str, {fontFamily:MONO, fontSize:'15px', color:color || '#ffd23f'})
+          .setOrigin(0.5).setDepth(DEPTH.TEXT);
+        this.tweens.add({targets:t, y:y-26, alpha:0, duration:900, onComplete:()=>t.destroy()});
+      }
+
+      destroyCell(c, r, isSteel){
         const t = this.map[r][c];
         if(t !== BRICK && t !== STEEL) return;
         this.map[r][c] = EMPTY;
         const sp = this.tileSprites[r][c];
         if(sp){ sp.destroy(); this.tileSprites[r][c] = null; }
-        this.debris(this.px(c), this.py(r));
-      }
-      debris(x, y){
-        for(let i=0;i<7;i++){
-          const p = this.add.rectangle(x, y, 4, 4, 0xb5622c).setDepth(15);
-          const a = Math.random()*Math.PI*2, d = 8 + Math.random()*16;
-          this.tweens.add({
-            targets:p, x:x+Math.cos(a)*d, y:y+Math.sin(a)*d,
-            alpha:0, duration:260+Math.random()*180,
-            onComplete:()=>p.destroy()
-          });
-        }
-        SFX.brick();
-      }
-      explosion(x, y, size){
-        const key = size === 2 ? 'exp2' : size === 1 ? 'exp1' : 'exp0';
-        const sp = this.add.image(x, y, key).setDepth(20);
-        this.tweens.add({
-          targets:sp,
-          scale:{from:0.5, to:size === 2 ? 1.9 : 1.25},
-          alpha:{from:1, to:0},
-          duration:size === 2 ? 620 : 400,
-          onComplete:()=>sp.destroy()
-        });
-        SFX.explode(size === 2);
-      }
-      floatText(x, y, str, color){
-        const t = this.add.text(x, y, str, {fontFamily:MONO, fontSize:'15px', color:color || '#ffd23f'})
-          .setOrigin(0.5).setDepth(30);
-        this.tweens.add({targets:t, y:y-26, alpha:0, duration:900, onComplete:()=>t.destroy()});
+        this.debris(this.px(c), this.py(r), isSteel);
       }
 
+      /* ---------- 玩家 ---------- */
       spawnPlayer(level){
         this.playerLevel = level || 0;
         const p = new Tank(this, this.playerSpawn.col, this.playerSpawn.row, true, 'player', this.playerLevel);
@@ -994,6 +1009,7 @@
         }
       }
 
+      /* ---------- 敌人 ---------- */
       spawnEnemy(){
         if(!this.enemyQueue.length) return;
         const type = this.enemyQueue.shift();
@@ -1102,13 +1118,14 @@
         this.updatePanel();
       }
 
+      /* ---------- 道具 ---------- */
       spawnPowerup(c, r){
         if(this.powerup && this.powerup.sprite) this.powerup.sprite.destroy();
         const types = ['star','tank','grenade','shovel','timer'];
         const type = types[Math.floor(Math.random()*types.length)];
         this.powerup = {
-          type, life:16,
-          sprite: this.add.image(this.px(c), this.py(r), 'pu_'+type).setDepth(12)
+          type: type, life: 16,
+          sprite: this.add.image(this.px(c), this.py(r), 'pu_'+type).setDepth(DEPTH.POWERUP)
         };
         SFX.powerup();
       }
@@ -1177,30 +1194,36 @@
         this.updatePanel();
         SFX.powerup();
       }
+      /* 铁锹：把基地护罩全部加固成钢墙（已被打掉的也会补回来） */
       applyShovel(){
-        for(const {c, r} of this.baseCells){
-          if(this.map[r][c] === BRICK){
+        for(const cell of this.baseCells){
+          const c = cell.c, r = cell.r;
+          if(this.map[r][c] !== STEEL){
             this.map[r][c] = STEEL;
-            this.tileSprites[r][c].setTexture('steel');
+            if(!this.tileSprites[r][c]) this.createTile(c, r, STEEL);
+            else this.tileSprites[r][c].setTexture('steel');
           }
         }
       }
+      /* 15 秒后恢复成原本的砖墙 */
       revertWalls(){
-        for(const {c, r} of this.baseCells){
-          if(this.map[r][c] === STEEL){
-            this.map[r][c] = BRICK;
-            this.tileSprites[r][c].setTexture('brick');
-          }
+        for(const cell of this.baseCells){
+          const c = cell.c, r = cell.r, orig = cell.orig;
+          if(orig !== BRICK) continue;
+          this.map[r][c] = BRICK;
+          if(!this.tileSprites[r][c]) this.createTile(c, r, BRICK);
+          else this.tileSprites[r][c].setTexture('brick');
         }
       }
 
+      /* ---------- 基地 / 胜负 ---------- */
       destroyBase(){
         if(this.baseDead) return;
         this.baseDead = true;
         this.map[this.baseRow][this.baseCol] = EMPTY;
         const sp = this.tileSprites[this.baseRow][this.baseCol];
         if(sp){ sp.destroy(); this.tileSprites[this.baseRow][this.baseCol] = null; }
-        this.add.image(this.px(this.baseCol), this.py(this.baseRow), 'base_dead').setDepth(3);
+        this.add.image(this.px(this.baseCol), this.py(this.baseRow), 'base_dead').setDepth(DEPTH.TERRAIN);
         this.explosion(this.px(this.baseCol), this.py(this.baseRow), 2);
         this.gameOver('基地被摧毁！');
       }
@@ -1247,14 +1270,21 @@
         this.txtStage.setText('STAGE ' + this.stageNum);
       }
 
+      /* ---------- 主循环（异常受保护，不会整屏卡死） ---------- */
       update(time, delta){
+        /* 注意：P 键检测必须放在"暂停提前返回"之前，
+           否则暂停后 update 直接 return，恢复按键永远检测不到 */
+        try{
+          if(Phaser.Input.Keyboard.JustDown(this.keys.pause)) this.togglePause();
+        }catch(err){
+          if(!this._errShown){ this._errShown = true; console.error(err); }
+        }
         try{
           this.stepGame(time, delta);
         }catch(err){
           if(!this._errShown){
             this._errShown = true;
             console.error('[坦克大战] 运行出错：', err);
-            logStep('!! 运行异常：' + (err && err.message));
           }
         }
       }
@@ -1263,6 +1293,7 @@
         if(this.state === 'paused') return;
         const dt = Math.min(delta, 50) / 1000;
 
+        // 水面动画
         this.waterT += dt;
         if(this.waterT > 0.45){
           this.waterT = 0;
@@ -1287,21 +1318,26 @@
         }
         if(this.state === 'play') this.controlPlayer(dt);
 
+        // 全局计时
         if(this.freezeTimer > 0) this.freezeTimer -= dt;
         if(this.shovelTimer > 0){
           this.shovelTimer -= dt;
           if(this.shovelTimer <= 0) this.revertWalls();
         }
 
+        // 玩家
         if(this.state !== 'play' && this.player && !this.player.dead) this.player.moving = false;
         if(this.player && !this.player.dead) this.player.update(dt);
 
+        // 敌人
         this.updateEnemies(dt);
 
+        // 子弹
         for(const b of this.bullets) if(!b.dead) b.update(dt);
         for(const b of this.bullets) if(b.owner.dead) b.kill();
         this.bullets = this.bullets.filter(b => !b.dead);
 
+        // 出兵
         if(this.state === 'play' && this.enemyQueue.length > 0 && this.enemies.length < this.maxField){
           this.spawnTimer -= dt;
           if(this.spawnTimer <= 0){
@@ -1312,18 +1348,17 @@
 
         this.updatePowerup(dt);
         this.checkStageEnd();
-
-        if(Phaser.Input.Keyboard.JustDown(this.keys.pause)) this.togglePause();
       }
     }
 
-    /* ---------------- 启动 ---------------- */
-    logStep('正在创建 Phaser.Game');
-    game = new Phaser.Game({
-      type: forceCanvas ? Phaser.CANVAS : Phaser.AUTO,
+    /* ---------------- 启动 ----------------
+       居中只交给 Phaser：FIT 等比缩放 + CENTER_BOTH 自动居中
+       父容器 #game 已用 CSS 给出明确尺寸（100vw/100vh） */
+    new Phaser.Game({
+      type: Phaser.AUTO,
       width: W, height: H,
       parent: 'game',
-      backgroundColor: '#1b2836',   /* 诊断色：若看到这个颜色说明渲染器工作正常 */
+      backgroundColor: '#000000',
       pixelArt: true,
       render: { pixelArt: true, antialias: false, roundPixels: false },
       scale: {
@@ -1332,11 +1367,6 @@
       },
       scene: [BootScene, MenuScene, GameScene]
     });
-    logStep('Phaser.Game 创建完成');
-
-    if(game.events && game.events.once){
-      game.events.once('ready', function(){ logStep('Phaser ready 事件'); });
-    }
   }
 
   loadNext();
