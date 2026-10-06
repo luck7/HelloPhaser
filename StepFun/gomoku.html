@@ -137,7 +137,7 @@ const BOARD_PX = MARGIN * 2 + CELL * (SIZE - 1);
 const EMPTY = 0, BLACK = 1, WHITE = 2;      // 黑=玩家，白=AI
 
 let board, current, gameOver, aiThinking, history;
-let stoneLayer, gfx, lastMark, statusEl, listEl, countsEl, sceneRef;
+let stoneLayer, gfx, lastMark, statusEl, listEl, countsEl;
 
 /* 坐标名：列字母 + 行号（底部为 1，顶部为 15） */
 const coordName = (x, y) => COLS[x] + (SIZE - y);
@@ -147,30 +147,34 @@ class GomokuScene extends Phaser.Scene {
   constructor() { super('gomoku'); }
 
   create() {
-    sceneRef = this;
     statusEl = document.getElementById('status');
     listEl   = document.getElementById('movelist');
     countsEl = document.getElementById('counts');
     this.mode = 'live';          // 'live' 对局中 | 'review' 复盘中
     this.reviewStep = 0;
 
-    /* ---- 背景与棋盘 ---- */
+    /* ---- 背景与棋盘木纹底 ---- */
     this.add.rectangle(W / 2, H / 2, W, H, 0x2b3a4a).setOrigin(0.5);
     this.add.rectangle(W / 2, H / 2, BOARD_PX + 16, BOARD_PX + 16, 0xd9a862)
       .setStrokeStyle(2, 0x8a6229);
 
+    /* ---- 网格线：用 lineBetween 逐条绘制（内部自带 beginPath → moveTo → lineTo → strokePath，渲染最稳） ---- */
     gfx = this.add.graphics();
     gfx.lineStyle(1, 0x5b3d17, 1);
     for (let i = 0; i < SIZE; i++) {
-      gfx.moveTo(MARGIN, MARGIN + i * CELL); gfx.lineTo(MARGIN + (SIZE - 1) * CELL, MARGIN + i * CELL);
-      gfx.moveTo(MARGIN + i * CELL, MARGIN); gfx.lineTo(MARGIN + i * CELL, MARGIN + (SIZE - 1) * CELL);
+      gfx.lineBetween(this.px(0), this.px(i), this.px(SIZE - 1), this.px(i));  // 横线
+      gfx.lineBetween(this.px(i), this.px(0), this.px(i), this.px(SIZE - 1));  // 竖线
     }
-    gfx.strokePath();
+    // 外框加粗
     gfx.lineStyle(2, 0x5b3d17, 1);
-    gfx.strokeRect(MARGIN, MARGIN, (SIZE - 1) * CELL, (SIZE - 1) * CELL);
-    [[3,3],[3,11],[11,3],[11,11],[7,7]].forEach(([x,y]) => {
-      gfx.fillStyle(0x5b3d17, 1);
-      gfx.fillCircle(MARGIN + x * CELL, MARGIN + y * CELL, 4);
+    gfx.lineBetween(this.px(0), this.px(0), this.px(SIZE - 1), this.px(0));
+    gfx.lineBetween(this.px(0), this.px(SIZE - 1), this.px(SIZE - 1), this.px(SIZE - 1));
+    gfx.lineBetween(this.px(0), this.px(0), this.px(0), this.px(SIZE - 1));
+    gfx.lineBetween(this.px(SIZE - 1), this.px(0), this.px(SIZE - 1), this.px(SIZE - 1));
+    // 星位
+    gfx.fillStyle(0x5b3d17, 1);
+    [[3,3],[3,11],[11,3],[11,11],[7,7]].forEach(([x, y]) => {
+      gfx.fillCircle(this.px(x), this.px(y), 4);
     });
 
     /* ---- 坐标标注：上下为列字母，左右为行号 ---- */
@@ -249,7 +253,7 @@ class GomokuScene extends Phaser.Scene {
     current = color === BLACK ? WHITE : BLACK;
   }
 
-  /* ---------- 根据历史渲染前 step 手（复盘用；复盘模式下附带手数） ---------- */
+  /* ---------- 根据历史渲染前 step 手（复盘模式下附带手数） ---------- */
   renderStones(step, animate = false) {
     stoneLayer.removeAll(true);
     lastMark.clear();
@@ -477,6 +481,7 @@ document.getElementById('btn-undo').onclick    = () => S().undo();
 document.getElementById('btn-swap').onclick    = () => S().resetGame(WHITE);
 document.getElementById('btn-prev').onclick    = () => S().stepReview(-1);
 document.getElementById('btn-next').onclick    = () => S().stepReview(1);
+document.getElementById('btn-auto').onclick    () => undefined;
 document.getElementById('btn-auto').onclick    = () => S().toggleAuto();
 document.getElementById('btn-live').onclick    = () => S().exitReview();
 
