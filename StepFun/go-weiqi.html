@@ -38,7 +38,7 @@
   summary{ cursor:pointer; color:var(--accent); margin-bottom:6px; }
   kbd{ background:#4a3a28; border:1px solid #6b5334; border-radius:4px; padding:0 4px; font-size:11px; }
 
-  /* ---- 棋谱：整体固定尺寸，内部三段式（标题 / 可滚动列表 / 导航）---- */
+  /* ---- 棋谱：窗口固定总高 + 每行固定行高，超出只滚动 ---- */
   #recordWrap{
     height:344px;                     /* 固定总高，不随手数变化 */
     display:flex; flex-direction:column; overflow:hidden;
@@ -49,22 +49,30 @@
     padding:7px 10px; font-size:12px; color:#c9a877; border-bottom:1px solid var(--line);
   }
   #recordList{
-    flex:1 1 auto; min-height:0;        /* 关键：允许在固定高度内收缩并滚动 */
-    display:grid; grid-template-columns:1fr 1fr; align-content:start; gap:2px; padding:6px;
+    flex:1 1 0; min-height:0;             /* 高度只由 flex 分配决定，与内容多少无关 */
+    display:grid; grid-template-columns:1fr 1fr;
+    grid-auto-rows:var(--row-h);          /* 每一行都是固定高度 */
+    align-content:start; gap:2px; padding:6px;
     overflow-y:auto; overscroll-behavior:contain;
   }
   #recordList::-webkit-scrollbar{ width:8px; }
   #recordList::-webkit-scrollbar-thumb{ background:#5a452c; border-radius:4px; }
-  .mv{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; padding:4px 6px;
-       border-radius:4px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-       border:1px solid transparent; }
+  .mv{
+    height:var(--row-h); line-height:calc(var(--row-h) - 2px);   /* 减掉上下边框 */
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; padding:0 6px;
+    border:1px solid transparent; border-radius:4px; cursor:pointer;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
   .mv:hover{ background:#3b2e21; }
   .mv .b{ color:#f3e6cf; } .mv .w{ color:#b9b9b9; }
   .mv .cap{ color:#8fd08f; margin-left:4px; font-size:11px; }
   .mv.cur{ background:#4a3a28; border-color:var(--accent); }
-  .mv.empty{ grid-column:1 / -1; color:#7a6a52; text-align:center; cursor:default; padding-top:12px; }
+  .mv.empty{ grid-column:1 / -1; color:#7a6a52; text-align:center; cursor:default; }
   .nav{ flex:0 0 auto; display:flex; gap:4px; padding:6px; border-top:1px solid var(--line); }
   .nav button{ flex:1; padding:6px 0; font-size:13px; }
+</style>
+<style>
+  :root{ --row-h:26px; }   /* 棋谱单行高度，改这里即可整体调整 */
 </style>
 </head>
 <body>
