@@ -7,65 +7,33 @@
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 <style>
   * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 0;
-    background: linear-gradient(135deg, #1b2735 0%, #090a0f 100%);
-    color: #e8e8e8;
-    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh;
-  }
+  body { margin: 0; padding: 0; background: linear-gradient(135deg, #1b2735 0%, #090a0f 100%); color: #e8e8e8; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
   h1 { font-size: 22px; margin: 18px 0 6px; letter-spacing: 2px; font-weight: 600; }
-  #status {
-    font-size: 16px; margin: 4px 0 12px; padding: 6px 18px;
-    background: rgba(255,255,255,.08); border-radius: 20px;
-    border: 1px solid rgba(255,255,255,.12);
-  }
+  #status { font-size: 16px; margin: 4px 0 12px; padding: 6px 18px; background: rgba(255,255,255,.08); border-radius: 20px; border: 1px solid rgba(255,255,255,.12); }
   #wrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
   #game { box-shadow: 0 12px 40px rgba(0,0,0,.6); border-radius: 8px; overflow: hidden; }
-
-  /* ---------- 右侧棋谱面板 ---------- */
-  #side {
-    width: 300px; background: rgba(255,255,255,.06);
-    border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
-    padding: 12px 14px;
-  }
+  #side { width: 300px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 12px 14px; }
   #side h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; letter-spacing: 1px; }
   #counts { font-size: 12px; color: #9aa5b3; margin-bottom: 8px; }
   #movelist { height: 400px; overflow-y: auto; padding-right: 4px; }
   #movelist::-webkit-scrollbar { width: 6px; }
   #movelist::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 3px; }
-  .mv {
-    display: flex; align-items: center; gap: 8px;
-    padding: 5px 8px; border-radius: 6px; cursor: pointer;
-    font-size: 13px; border-bottom: 1px solid rgba(255,255,255,.05);
-  }
+  .mv { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,.05); }
   .mv:hover { background: rgba(255,255,255,.10); }
   .mv.cur { background: rgba(255,82,82,.28); }
   .mv .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
   .mv .no { width: 26px; color: #8b96a5; text-align: right; flex: none; }
   .mv .coord { margin-left: auto; font-family: Consolas, monospace; font-weight: bold; color: #ffd479; }
   #empty { font-size: 13px; color: #6f7a89; text-align: center; padding: 30px 0; }
-
-  #review-ctrl { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-  #review-ctrl button {
-    flex: 1; min-width: 66px; padding: 7px 4px; font-size: 13px;
-    color: #fff; background: rgba(255,255,255,.10);
-    border: 1px solid rgba(255,255,255,.22); border-radius: 7px; cursor: pointer;
-    transition: all .15s;
-  }
-  #review-ctrl button:hover { background: rgba(255,255,255,.22); }
-  #review-ctrl button:disabled { opacity: .35; cursor: not-allowed; }
-
+  .row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .row button { flex: 1; min-width: 66px; padding: 7px 4px; font-size: 13px; color: #fff; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.22); border-radius: 7px; cursor: pointer; transition: all .15s; }
+  .row button:hover { background: rgba(255,255,255,.22); }
+  .row button:disabled { opacity: .35; cursor: not-allowed; }
   #panel { margin: 14px 0 24px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-  #panel button {
-    padding: 9px 22px; font-size: 14px; cursor: pointer;
-    color: #fff; background: rgba(255,255,255,.1);
-    border: 1px solid rgba(255,255,255,.25); border-radius: 8px;
-    transition: all .18s;
-  }
+  #panel button { padding: 9px 22px; font-size: 14px; cursor: pointer; color: #fff; background: rgba(255,255,white,.1); border: 1px solid rgba(255,255,255,.25); border-radius: 8px; transition: all .18s; }
   #panel button:hover { background: rgba(255,255,255,.22); transform: translateY(-1px); }
   .tip { font-size: 12px; color: #8b96a5; margin-bottom: 20px; }
+  #file-input { display: none; }
 </style>
 </head>
 <body>
@@ -74,16 +42,21 @@
 
 <div id="wrap">
   <div id="game"></div>
-
   <div id="side">
-    <h2>📜 棋谱记录</h2>
-    <div id="counts">黑 0 手 · 白 0 手</div>
+    <h2>&#128220; 棋谱记录</h2>
+    <div id="counts">黑 0 手 &middot; 白 0 手</div>
     <div id="movelist"><div id="empty">暂无落子记录</div></div>
-    <div id="review-ctrl">
-      <button id="btn-prev">◀ 上一步</button>
-      <button id="btn-next">下一步 ▶</button>
-      <button id="btn-auto">▶ 自动</button>
-      <button id="btn-live">⏹ 退出复盘</button>
+
+    <div class="row">
+      <button id="btn-prev">&#9664; 上一步</button>
+      <button id="btn-next">下一步 &#9654;</button>
+      <button id="btn-auto">&#9654; 自动</button>
+      <button id="btn-live">&#9209; 退出复盘</button>
+    </div>
+    <div class="row">
+      <button id="btn-save">&#128190; 保存棋谱</button>
+      <button id="btn-sgf">&#128191; 存 SGF</button>
+      <button id="btn-import">&#128194; 导入复盘</button>
     </div>
   </div>
 </div>
@@ -92,96 +65,110 @@
   <button id="btn-restart">重新开始</button>
   <button id="btn-undo">悔棋</button>
   <button id="btn-swap">切换先手</button>
-  <button id="btn-sound">🔊 音效：开</button>
+  <button id="btn-sound">&#128266; 音效：开</button>
 </div>
-<div class="tip">坐标：列 A–O，行 1–15（左下角为 A1）｜复盘：点击棋谱任一手，或用 ← → 键逐步查看</div>
+<div class="tip">坐标：列 A&ndash;O，行 1&ndash;15（左下角为 A1）｜复盘：点击棋谱任一手或用 &larr; &rarr; 键｜棋谱可存为 JSON / SGF，也可导入继续复盘</div>
+
+<input type="file" id="file-input" accept=".json,application/json">
 
 <script>
-/* ================= 音效（Web Audio 合成，无需外部文件） =================
-   类比：合成器发声 —— 振荡器产生基础波形，再用 GainNode 包络
-   （瞬间爬升 + 指数衰减）塑造成短促的"哒"声。 */
+/* ================= 音效（Web Audio 合成，无需外部文件） ================= */
 const SFX = {
-  ctx: null, enabled: true,
+  ctx: null,
+  enabled: true,
   ac() {
-    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (this.ctx.state === 'suspended') { this.ctx.resume(); }
     return this.ctx;
   },
-  tone(freq, dur = 0.1, type = 'triangle', vol = 0.25, delay = 0) {
+  tone(freq, dur, type, vol, delay) {
     if (!this.enabled) return;
-    const ctx = this.ac(), t0 = ctx.currentTime + delay;
-    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    dur = dur || 0.1;
+    type = type || 'triangle';
+    vol = vol || 0.25;
+    delay = delay || 0;
+    const ctx = this.ac();
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, t0);
     gain.gain.setValueAtTime(vol, t0);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.connect(gain).connect(ctx.destination);
-    osc.start(t0); osc.stop(t0 + dur + 0.02);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
   },
-  place(color) { const f = color === 1 ? 190 : 300; this.tone(f, 0.09, 'triangle', 0.3); this.tone(f * 1.5, 0.05, 'square', 0.06); },
+  place(color) {
+    const f = color === BLACK ? 190 : 300;
+    this.tone(f, 0.09, 'triangle', 0.3);
+    this.tone(f * 1.5, 0.05, 'square', 0.06);
+  },
   deny() { this.tone(120, 0.14, 'sawtooth', 0.15); },
-  undo() { this.tone(500, 0.07, 'sine', 0.18); this.tone(330, 0.09, 'sine', 0.18, 0.06); },
+  undo() {
+    this.tone(500, 0.07, 'sine', 0.18);
+    this.tone(330, 0.09, 'sine', 0.18, 0.06);
+  },
   win()  { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.28, 'triangle', 0.26, i * 0.11)); },
   lose() { [440, 392, 330, 262].forEach((f, i) => this.tone(f, 0.30, 'sine', 0.24, i * 0.13)); },
-  draw() { [440, 440].forEach((f, i) => this.tone(f, 0.2, 'sine', 0.2, i * 0.25)); }
+  draw() {
+    this.tone(440, 0.2, 'sine', 0.2, 0);
+    this.tone(440, 0.2, 'sine', 0.2, 0.25);
+  }
 };
 
 /* ================= 基本配置 ================= */
 const SIZE   = 15;
 const CELL   = 38;
 const MARGIN = 46;
-const COLS   = 'ABCDEFGHIJKLMNO';          // 列标（左→右）
-const W = 640, H = 640;
+const COLS   = 'ABCDEFGHIJKLMNO';
+const SGF_L  = 'abcdefghijklmno';
+const W = 640;
+const H = 640;
 const BOARD_PX = MARGIN * 2 + CELL * (SIZE - 1);
 
-const EMPTY = 0, BLACK = 1, WHITE = 2;      // 黑=玩家，白=AI
+const EMPTY = 0;
+const BLACK = 1;
+const WHITE = 2;
 
 let board, current, gameOver, aiThinking, history;
 let stoneLayer, gfx, lastMark, statusEl, listEl, countsEl;
 
 /* 坐标名：列字母 + 行号（底部为 1，顶部为 15） */
-const coordName = (x, y) => COLS[x] + (SIZE - y);
+const coordName = (x, y) => COLS.charAt(x) + (SIZE - y);
+const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
+const stamp = () => {
+  const d = new Date();
+  return d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '_' +
+         pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds());
+};
 
 /* ================= Phaser 场景 ================= */
 class GomokuScene extends Phaser.Scene {
-  constructor() { super('gomoku'); }
+  constructor() {
+    super('gomoku');
+  }
 
   create() {
     statusEl = document.getElementById('status');
     listEl   = document.getElementById('movelist');
     countsEl = document.getElementById('counts');
-    this.mode = 'live';          // 'live' 对局中 | 'review' 复盘中
+    this.mode = 'live';
     this.reviewStep = 0;
 
-    /* ---- 背景与棋盘木纹底 ---- */
+    /* 背景与棋盘木纹底 */
     this.add.rectangle(W / 2, H / 2, W, H, 0x2b3a4a).setOrigin(0.5);
-    this.add.rectangle(W / 2, H / 2, BOARD_PX + 16, BOARD_PX + 16, 0xd9a862)
-      .setStrokeStyle(2, 0x8a6229);
+    this.add.rectangle(W / 2, H / 2, BOARD_PX + 16, BOARD_PX + 16, 0xd9a862).setStrokeStyle(2, 0x8a6229);
 
-    /* ---- 网格线：用 lineBetween 逐条绘制（内部自带 beginPath → moveTo → lineTo → strokePath，渲染最稳） ---- */
-    gfx = this.add.graphics();
-    gfx.lineStyle(1, 0x5b3d17, 1);
-    for (let i = 0; i < SIZE; i++) {
-      gfx.lineBetween(this.px(0), this.px(i), this.px(SIZE - 1), this.px(i));  // 横线
-      gfx.lineBetween(this.px(i), this.px(0), this.px(i), this.px(SIZE - 1));  // 竖线
-    }
-    // 外框加粗
-    gfx.lineStyle(2, 0x5b3d17, 1);
-    gfx.lineBetween(this.px(0), this.px(0), this.px(SIZE - 1), this.px(0));
-    gfx.lineBetween(this.px(0), this.px(SIZE - 1), this.px(SIZE - 1), this.px(SIZE - 1));
-    gfx.lineBetween(this.px(0), this.px(0), this.px(0), this.px(SIZE - 1));
-    gfx.lineBetween(this.px(SIZE - 1), this.px(0), this.px(SIZE - 1), this.px(SIZE - 1));
-    // 星位
-    gfx.fillStyle(0x5b3d17, 1);
-    [[3,3],[3,11],[11,3],[11,11],[7,7]].forEach(([x, y]) => {
-      gfx.fillCircle(this.px(x), this.px(y), 4);
-    });
+    this.drawBoard();
 
-    /* ---- 坐标标注：上下为列字母，左右为行号 ---- */
+    /* 坐标标注：上下为列字母，左右为行号 */
     const ls = { fontFamily: 'Arial', fontSize: '15px', color: '#7a5320', fontStyle: 'bold' };
     for (let i = 0; i < SIZE; i++) {
-      this.add.text(this.px(i), MARGIN - 24, COLS[i], ls).setOrigin(0.5);
-      this.add.text(this.px(i), MARGIN + (SIZE - 1) * CELL + 24, COLS[i], ls).setOrigin(0.5);
+      this.add.text(this.px(i), MARGIN - 24, COLS.charAt(i), ls).setOrigin(0.5);
+      this.add.text(this.px(i), MARGIN + (SIZE - 1) * CELL + 24, COLS.charAt(i), ls).setOrigin(0.5);
       this.add.text(MARGIN - 24, this.px(i), String(SIZE - i), ls).setOrigin(0.5);
       this.add.text(MARGIN + (SIZE - 1) * CELL + 24, this.px(i), String(SIZE - i), ls).setOrigin(0.5);
     }
@@ -193,13 +180,49 @@ class GomokuScene extends Phaser.Scene {
     this.resetGame();
   }
 
-  inside(x, y) { return x >= 0 && y >= 0 && x < SIZE && y < SIZE; }
-  px(i) { return MARGIN + i * CELL; }
+  /* 网格线：CANVAS 渲染器 + 每条线独立描边（Canvas 2D 原生 beginPath/stroke，最可靠） */
+  drawBoard() {
+    if (gfx) { gfx.clear(); }
+    gfx = this.add.graphics();
+    gfx.lineStyle(2, 0x5b3d17, 1);
+    for (let i = 0; i < SIZE; i++) {
+      gfx.beginPath();
+      gfx.moveTo(this.px(0), this.px(i));
+      gfx.lineTo(this.px(SIZE - 1), this.px(i));
+      gfx.strokePath();
+      gfx.beginPath();
+      gfx.moveTo(this.px(i), this.px(0));
+      gfx.lineTo(this.px(i), this.px(SIZE - 1));
+      gfx.strokePath();
+    }
+    gfx.lineStyle(3, 0x5b3d17, 1);
+    [[0, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 1], [1, 0, 0, 1]].forEach((c) => {
+      gfx.beginPath();
+      gfx.moveTo(this.px(c[0] === 1 ? SIZE - 1 : 0), this.px(c[1] === 1 ? SIZE - 1 : 0));
+      gfx.lineTo(this.px(c[2] === 1 ? SIZE - 1 : 0), this.px(c[3] === 1 ? SIZE - 1 : 0));
+      gfx.strokePath();
+    });
+    gfx.fillStyle(0x5b3d17, 1);
+    [[3, 3], [3, 11], [11, 3], [11, 11], [7, 7]].forEach((p) => {
+      gfx.fillCircle(this.px(p[0]), this.px(p[1]), 4);
+    });
+  }
 
-  /* ---------- 重置 ---------- */
-  resetGame(firstPlayer = BLACK) {
+  inside(x, y) {
+    return x >= 0 && y >= 0 && x < SIZE && y < SIZE;
+  }
+
+  px(i) {
+    return MARGIN + i * CELL;
+  }
+
+  resetGame(firstPlayer) {
+    firstPlayer = firstPlayer || BLACK;
     this.stopAuto();
-    board = Array.from({ length: SIZE }, () => new Array(SIZE).fill(EMPTY));
+    board = [];
+    for (let x = 0; x < SIZE; x++) {
+      board[x] = new Array(SIZE).fill(EMPTY);
+    }
     history = [];
     current = firstPlayer;
     gameOver = false;
@@ -211,25 +234,30 @@ class GomokuScene extends Phaser.Scene {
     this.refreshList();
     this.setStatus(firstPlayer === BLACK ? '黑棋（你）先行，点击棋盘落子' : 'AI 先行，请等待…');
     SFX.tone(660, 0.18, 'sine', 0.2);
-    if (firstPlayer === WHITE) this.aiMove();
+    if (firstPlayer === WHITE) { this.aiMove(); }
   }
 
-  /* ---------- 鼠标落子 ---------- */
   onPointerDown(pointer) {
-    if (this.mode === 'review') { SFX.deny(); this.setStatus('复盘模式中，请先点击「退出复盘」再落子'); return; }
-    if (gameOver || current !== BLACK || aiThinking) return;
+    if (this.mode === 'review') {
+      SFX.deny();
+      this.setStatus('复盘模式中，请先点击「退出复盘」再落子');
+      return;
+    }
+    if (gameOver || current !== BLACK || aiThinking) { return; }
     const x = Math.round((pointer.x - MARGIN) / CELL);
     const y = Math.round((pointer.y - MARGIN) / CELL);
     if (!this.inside(x, y) || board[x][y] !== EMPTY ||
-        Math.hypot(pointer.x - this.px(x), pointer.y - this.px(y)) > CELL * 0.6) { SFX.deny(); return; }
+        Math.hypot(pointer.x - this.px(x), pointer.y - this.px(y)) > CELL * 0.6) {
+      SFX.deny();
+      return;
+    }
     this.doMove(x, y, BLACK);
-    if (!gameOver) this.aiMove();
+    if (!gameOver) { this.aiMove(); }
   }
 
-  /* ---------- 落子 ---------- */
   doMove(x, y, color) {
     board[x][y] = color;
-    history.push({ x, y, color });
+    history.push({ x: x, y: y, color: color });
     this.mode = 'live';
     this.stopAuto();
     SFX.place(color);
@@ -242,30 +270,34 @@ class GomokuScene extends Phaser.Scene {
       gameOver = true;
       this.highlightWin(win);
       this.setStatus(color === BLACK ? '🎉 你赢了！' : '💻 AI 获胜，再来一局？');
-      this.time.delayedCall(250, () => color === BLACK ? SFX.win() : SFX.lose());
+      this.time.delayedCall(250, () => {
+        if (color === BLACK) { SFX.win(); } else { SFX.lose(); }
+      });
       return;
     }
     if (history.length === SIZE * SIZE) {
-      gameOver = true; this.setStatus('平局！');
+      gameOver = true;
+      this.setStatus('平局！');
       this.time.delayedCall(250, () => SFX.draw());
       return;
     }
     current = color === BLACK ? WHITE : BLACK;
   }
 
-  /* ---------- 根据历史渲染前 step 手（复盘模式下附带手数） ---------- */
-  renderStones(step, animate = false) {
+  renderStones(step, animate) {
     stoneLayer.removeAll(true);
     lastMark.clear();
     const showNum = this.mode === 'review';
     for (let i = 0; i < step; i++) {
-      const m = history[i], cx = this.px(m.x), cy = this.px(m.y);
+      const m = history[i];
+      const cx = this.px(m.x);
+      const cy = this.px(m.y);
       const c = this.add.circle(cx, cy, CELL * 0.42, m.color === BLACK ? 0x1a1a1a : 0xf5f5f5);
       c.setStrokeStyle(1, m.color === BLACK ? 0x000000 : 0xbbbbbb);
       stoneLayer.add(c);
       if (showNum) {
         const t = this.add.text(cx, cy, String(i + 1),
-          { fontFamily: 'Arial', fontSize: '12px', color: m.color === BLACK ? '#e6e6e6' : '#333' }).setOrigin(0.5);
+          { fontFamily: 'Arial', fontSize: '12px', color: m.color === BLACK ? '#e6e6e6' : '#333333' }).setOrigin(0.5);
         stoneLayer.add(t);
       }
       if (i === step - 1 && animate) {
@@ -275,74 +307,95 @@ class GomokuScene extends Phaser.Scene {
     }
     if (step > 0) {
       const m = history[step - 1];
-      lastMark.lineStyle(2, 0xff5252, 1);
+      lastMark.lineStyle(2, 0xff5255, 1);
       lastMark.strokeCircle(this.px(m.x), this.px(m.y), CELL * 0.16);
     }
   }
 
-  /* ---------- 棋谱面板 ---------- */
   refreshList() {
     const cur = this.mode === 'review' ? this.reviewStep : history.length;
-    const black = history.filter(m => m.color === BLACK).length;
+    let black = 0;
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].color === BLACK) { black++; }
+    }
     const white = history.length - black;
-    countsEl.textContent = `黑 ${black} 手 · 白 ${white} 手`;
+    countsEl.textContent = '黑 ' + black + ' 手 · 白 ' + white + ' 手';
     if (!history.length) {
       listEl.innerHTML = '<div id="empty">暂无落子记录</div>';
       return;
     }
-    listEl.innerHTML = history.map((m, i) => `
-      <div class="mv ${i + 1 === cur ? 'cur' : ''}" data-i="${i + 1}">
-        <span class="dot" style="background:${m.color === BLACK ? '#1a1a1a' : '#f5f5f5'};border:1px solid #999"></span>
-        <span class="no">${i + 1}</span>
-        <span>${m.color === BLACK ? '黑(你)' : '白(AI)'}</span>
-        <span class="coord">${coordName(m.x, m.y)}</span>
-      </div>`).join('');
-    const el = listEl.querySelector('.mv.cur');
-    if (el) el.scrollIntoView({ block: 'nearest' });
+    let html = '';
+    for (let i = 0; i < history.length; i++) {
+      const m = history[i];
+      html += '<div class="mv' + (i + 1 === cur ? ' cur' : '') + '" data-i="' + (i + 1) + '">'
+           +   '<span class="dot" style="background:' + (m.color === BLACK ? '#1a1a1a' : '#f5f5f5') + ';border:1px solid #999999"></span>'
+           +   '<span class="no">' + (i + 1) + '</span>'
+           +   '<span>' + (m.color === BLACK ? '黑(你)' : '白(AI)') + '</span>'
+           +   '<span class="coord">' + coordName(m.x, m.y) + '</span>'
+           + '</div>';
+    }
+    listEl.innerHTML = html;
+    const el2 = listEl.querySelector('.mv.cur');
+    if (el2) { el2.scrollIntoView({ block: 'nearest' }); }
   }
 
-  /* ---------- 复盘控制 ---------- */
   enterReview(step) {
-    if (!history.length) return;
+    if (!history.length) { return; }
     this.mode = 'review';
     this.reviewStep = Phaser.Math.Clamp(step, 0, history.length);
     this.renderStones(this.reviewStep);
     this.refreshList();
-    this.setStatus(`复盘模式：第 ${this.reviewStep} / ${history.length} 手（← → 切换）`);
+    this.setStatus('复盘模式：第 ' + this.reviewStep + ' / ' + history.length + ' 手（← → 切换）');
     this.updateReviewButtons();
   }
+
   stepReview(delta) {
-    if (this.mode !== 'review') this.enterReview(history.length);
+    if (this.mode !== 'review') { this.enterReview(history.length); }
     this.enterReview(this.reviewStep + delta);
     SFX.tone(delta > 0 ? 620 : 480, 0.06, 'sine', 0.14);
   }
+
   exitReview() {
     this.stopAuto();
     this.mode = 'live';
     this.renderStones(history.length);
     this.refreshList();
     this.updateReviewButtons();
-    this.setStatus(gameOver ? (current === BLACK ? '💻 AI 获胜' : '🎉 你赢了！')
-                            : '轮到你（黑棋）落子');
+    this.setStatus(gameOver ? (current === BLACK ? '💻 AI 获胜' : '🎉 你赢了！') : '轮到你（黑棋）落子');
   }
+
   toggleAuto() {
-    if (this.autoTimer) { this.stopAuto(); this.updateReviewButtons(); return; }
-    if (this.mode !== 'review') this.enterReview(1);
+    if (this.autoTimer) {
+      this.stopAuto();
+      this.updateReviewButtons();
+      return;
+    }
+    if (this.mode !== 'review') { this.enterReview(1); }
+    document.getElementById('btn-auto').textContent = '⏸ 暂停';
     this.autoTimer = this.time.addEvent({
-      delay: 700, loop: true,
+      delay: 700,
+      loop: true,
       callback: () => {
-        if (this.reviewStep >= history.length) { this.stopAuto(); this.updateReviewButtons(); return; }
+        if (this.reviewStep >= history.length) {
+          this.stopAuto();
+          this.updateReviewButtons();
+          return;
+        }
         this.enterReview(this.reviewStep + 1);
         SFX.tone(700, 0.05, 'sine', 0.1);
       }
     });
-    document.getElementById('btn-auto').textContent = '⏸ 暂停';
   }
+
   stopAuto() {
-    if (this.autoTimer) { this.autoTimer.remove(); this.autoTimer = null; }
+    if (this.autoTimer) {
+      this.autoTimer.remove();
+      this.autoTimer = null;
+    }
     const b = document.getElementById('btn-auto');
-    if (b) b.textContent = '▶ 自动';
+    if (b) { b.textContent = '▶ 自动'; }
   }
+
   updateReviewButtons() {
     const inReview = this.mode === 'review';
     document.getElementById('btn-prev').disabled = !inReview || this.reviewStep <= 0;
@@ -351,11 +404,16 @@ class GomokuScene extends Phaser.Scene {
   }
 
   highlightWin(cells) {
-    const pts = cells.map(([x, y]) => new Phaser.Geom.Point(this.px(x), this.px(y)));
+    const self = this;
+    const pts = cells.map((c) => new Phaser.Geom.Point(self.px(c[0]), self.px(c[1])));
     const line = new Phaser.Geom.Line(pts[0].x, pts[0].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
     this.tweens.addCounter({
-      from: 0, to: 1, duration: 500, yoyo: true, repeat: 3,
-      onUpdate: t => {
+      from: 0,
+      to: 1,
+      duration: 500,
+      yoyo: true,
+      repeat: 3,
+      onUpdate: (t) => {
         lastMark.clear();
         lastMark.lineStyle(5, 0xff3b3b, t.getValue());
         lastMark.strokeLineShape(line);
@@ -363,7 +421,10 @@ class GomokuScene extends Phaser.Scene {
     });
   }
 
-  setStatus(t) { statusEl.textContent = t; this.updateReviewButtons(); }
+  setStatus(t) {
+    statusEl.textContent = t;
+    this.updateReviewButtons();
+  }
 
   /* ================= AI ================= */
   aiMove() {
@@ -372,94 +433,189 @@ class GomokuScene extends Phaser.Scene {
     this.time.delayedCall(120, () => {
       const mv = this.bestMove();
       aiThinking = false;
-      if (mv) this.doMove(mv.x, mv.y, WHITE);
-      if (!gameOver) this.setStatus('轮到你（黑棋）落子');
+      if (mv) { this.doMove(mv.x, mv.y, WHITE); }
+      if (!gameOver) { this.setStatus('轮到你（黑棋）落子'); }
     });
   }
 
   /* 棋型打分：假想 color 一方下在 (x,y) 的价值 */
   evalPoint(x, y, color) {
-    const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
+    const DIRS = [[1, 0], [0, 1], [1, 1], [1, -1]];
     let total = 0;
-    for (const [dx, dy] of DIRS) {
-      let count = 1, open = 0;
-      for (const s of [1, -1]) {
+    for (let d = 0; d < DIRS.length; d++) {
+      const dx = DIRS[d][0];
+      const dy = DIRS[d][1];
+      let count = 1;
+      let open = 0;
+      for (let s = 0; s < 2; s++) {
+        const sign = s === 0 ? 1 : -1;
         let i = 1;
         while (true) {
-          const nx = x + dx * i * s, ny = y + dy * i * s;
+          const nx = x + dx * i * sign;
+          const ny = y + dy * i * sign;
           if (!this.inside(nx, ny) || board[nx][ny] === EMPTY) {
-            if (this.inside(nx, ny) && board[nx][ny] === EMPTY) open++;
+            if (this.inside(nx, ny) && board[nx][ny] === EMPTY) { open++; }
             break;
           }
-          if (board[nx][ny] !== color) break;
-          count++; i++;
+          if (board[nx][ny] !== color) { break; }
+          count++;
+          i++;
         }
       }
-      if      (count >= 5) total += 1000000;
-      else if (count === 4) total += open === 2 ? 120000 : open === 1 ? 12000 : 0;
-      else if (count === 3) total += open === 2 ? 10000  : open === 1 ? 900   : 0;
-      else if (count === 2) total += open === 2 ? 700    : open === 1 ? 90    : 0;
-      else                 total += open === 2 ? 25     : 12;
+      if      (count >= 5) { total += 1000000; }
+      else if (count === 4) { total += open === 2 ? 120000 : (open === 1 ? 12000 : 0); }
+      else if (count === 3) { total += open === 2 ? 10000  : (open === 1 ? 900   : 0); }
+      else if (count === 2) { total += open === 2 ? 700    : (open === 1 ? 90    : 0); }
+      else                  { total += open === 2 ? 25     : 12; }
     }
     return total;
   }
 
+  /* 选点：进攻分 + 防守分（只搜索已有棋子附近 2 格） */
   bestMove() {
-    if (history.length === 0) return { x: 7, y: 7 };
+    if (history.length === 0) { return { x: 7, y: 7 }; }
     const cands = [];
-    for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) {
-      if (board[x][y] !== EMPTY || !this.hasNeighbor(x, y, 2)) continue;
-      const atk = this.evalPoint(x, y, WHITE);
-      const def = this.evalPoint(x, y, BLACK);
-      const center = (Math.abs(x - 7) + Math.abs(y - 7)) * -1;
-      cands.push({ x, y, score: atk + def * 0.88 + center });
+    for (let x = 0; x < SIZE; x++) {
+      for (let y = 0; y < SIZE; y++) {
+        if (board[x][y] !== EMPTY || !this.hasNeighbor(x, y, 2)) { continue; }
+        const atk = this.evalPoint(x, y, WHITE);
+        const def = this.evalPoint(x, y, BLACK);
+        const center = (Math.abs(x - 7) + Math.abs(y - 7)) * -1;
+        cands.push({ x: x, y: y, score: atk + def * 0.88 + center });
+      }
     }
     if (!cands.length) {
-      for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++)
-        if (board[x][y] === EMPTY) cands.push({ x, y, score: 0 });
+      for (let x = 0; x < SIZE; x++) {
+        for (let y = 0; y < SIZE; y++) {
+          if (board[x][y] === EMPTY) { cands.push({ x: x, y: y, score: 0 }); }
+        }
+      }
     }
     cands.sort((a, b) => b.score - a.score);
-    const pool = cands.filter(c => c.score >= cands[0].score - 1).slice(0, 3);
+    const pool = cands.filter((c) => c.score >= cands[0].score - 1).slice(0, 3);
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
   hasNeighbor(x, y, r) {
-    for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) {
-      const nx = x + i, ny = y + j;
-      if (this.inside(nx, ny) && board[nx][ny] !== EMPTY) return true;
+    for (let i = -r; i <= r; i++) {
+      for (let j = -r; j <= r; j++) {
+        const nx = x + i;
+        const ny = y + j;
+        if (this.inside(nx, ny) && board[nx][ny] !== EMPTY) { return true; }
+      }
     }
     return false;
   }
 
-  /* ================= 胜负判定 ================= */
   findWin(x, y, color) {
-    const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
-    for (const [dx, dy] of DIRS) {
+    const DIRS = [[1, 0], [0, 1], [1, 1], [1, -1]];
+    for (let d = 0; d < DIRS.length; d++) {
+      const dx = DIRS[d][0];
+      const dy = DIRS[d][1];
       const cells = [[x, y]];
-      for (const s of [1, -1]) {
+      for (let s = 0; s < 2; s++) {
+        const sign = s === 0 ? 1 : -1;
         let i = 1;
         while (true) {
-          const nx = x + dx * i * s, ny = y + dy * i * s;
-          if (this.inside(nx, ny) && board[nx][ny] === color) { cells.push([nx, ny]); i++; }
-          else break;
+          const nx = x + dx * i * sign;
+          const ny = y + dy * i * sign;
+          if (this.inside(nx, ny) && board[nx][ny] === color) {
+            cells.push([nx, ny]);
+            i++;
+          } else {
+            break;
+          }
         }
       }
-      if (cells.length >= 5) return cells;
+      if (cells.length >= 5) { return cells; }
     }
     return null;
   }
 
-  /* ================= 悔棋 ================= */
+  /* ================= 棋谱导出 ================= */
+  historyCount() {
+    return history.length;
+  }
+
+  winner() {
+    if (!gameOver) { return '0'; }
+    return current === BLACK ? 'W' : 'B';
+  }
+
+  buildJSON() {
+    return JSON.stringify({
+      game: '五子棋',
+      size: SIZE,
+      date: new Date().toISOString(),
+      firstPlayer: history.length ? (history[0].color === BLACK ? 'B' : 'W') : 'B',
+      result: this.winner(),
+      moves: history.map((m, i) => ({
+        n: i + 1,
+        c: m.color === BLACK ? 'B' : 'W',
+        x: m.x,
+        y: m.y,
+        coord: coordName(m.x, m.y)
+      }))
+    }, null, 2);
+  }
+
+  buildSGF() {
+    let s = '(;GM[5]FF[4]CA[UTF-8]AP[Phaser-Gomoku]SZ[' + SIZE + ']';
+    s += 'PB[玩家]PW[AI]';
+    s += 'DT[' + new Date().toISOString().slice(0, 10) + ']';
+    s += 'RE[' + this.winner() + '+?]';
+    for (let i = 0; i < history.length; i++) {
+      const m = history[i];
+      s += ';' + (m.color === BLACK ? 'B' : 'W') + '[' + SGF_L.charAt(m.x) + SGF_L.charAt(m.y) + ']';
+    }
+    return s + ')';
+  }
+
+  /* ================= 棋谱导入 ================= */
+  importJSON(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { return '文件不是合法 JSON'; }
+    if (!data || typeof data !== 'object') { return '文件格式不正确'; }
+    if (data.size !== SIZE) { return '棋盘规格不是 ' + SIZE + ' 路，无法导入'; }
+    if (!Array.isArray(data.moves)) { return '缺少 moves 棋谱数组'; }
+
+    board = [];
+    for (let x = 0; x < SIZE; x++) { board[x] = new Array(SIZE).fill(EMPTY); }
+    history = [];
+    let n = 0;
+    while (n < data.moves.length) {
+      const mv = data.moves[n];
+      if (!mv || !this.inside(mv.x, mv.y)) { break; }
+      const color = (typeof mv.c === 'string')
+        ? (mv.c.toUpperCase() === 'B' ? BLACK : WHITE)
+        : mv.color;
+      if ((color !== BLACK && color !== WHITE) || board[mv.x][mv.y] !== EMPTY) { break; }
+      board[mv.x][mv.y] = color;
+      history.push({ x: mv.x, y: mv.y, color: color });
+      n++;
+    }
+    current = history.length ? (history[history.length - 1].color === BLACK ? WHITE : BLACK) : BLACK;
+    const last = history[history.length - 1];
+    gameOver = !!last && !!this.findWin(last.x, last.y, last.color);
+    this.mode = 'review';
+    this.stopAuto();
+    this.renderStones(history.length);
+    this.refreshList();
+    const note = (n < data.moves.length) ? ('（前 ' + n + ' 手有效，后续已忽略）') : '';
+    this.setStatus('已导入 ' + history.length + ' 手，进入复盘' + note + '，← → 可逐步查看');
+    return null;
+  }
+
   undo() {
-    if (gameOver || history.length === 0 || aiThinking) return;
-    if (this.mode === 'review') this.exitReview();
+    if (gameOver || history.length === 0 || aiThinking) { return; }
+    if (this.mode === 'review') { this.exitReview(); }
     const pop = () => {
       const m = history.pop();
       board[m.x][m.y] = EMPTY;
       return m;
     };
     const lastMv = history[history.length - 1];
-    if (lastMv && lastMv.color === WHITE) { pop(); pop(); } else pop();
+    if (lastMv && lastMv.color === WHITE) { pop(); pop(); } else { pop(); }
     current = BLACK;
     this.renderStones(history.length);
     this.refreshList();
@@ -468,11 +624,19 @@ class GomokuScene extends Phaser.Scene {
   }
 }
 
-/* ================= 启动 ================= */
+/* ================= 启动 =================
+   使用 Phaser.CANVAS：五子棋只需静态网格与少量圆形，
+   Canvas 2D 渲染器下 Graphics 的 beginPath/strokePath 由浏览器原生实现，
+   可完全避免 WebGL 下偶发的线条丢失问题。 */
 const game = new Phaser.Game({
-  type: Phaser.AUTO, width: W, height: H, parent: 'game',
-  backgroundColor: '#2b3a4a', scene: GomokuScene
+  type: Phaser.CANVAS,
+  width: W,
+  height: H,
+  parent: 'game',
+  backgroundColor: '#2b3a4a',
+  scene: GomokuScene
 });
+
 const S = () => game.scene.getScene('gomoku');
 
 /* ---------- 按钮绑定 ---------- */
@@ -481,18 +645,64 @@ document.getElementById('btn-undo').onclick    = () => S().undo();
 document.getElementById('btn-swap').onclick    = () => S().resetGame(WHITE);
 document.getElementById('btn-prev').onclick    = () => S().stepReview(-1);
 document.getElementById('btn-next').onclick    = () => S().stepReview(1);
-document.getElementById('btn-auto').onclick    () => undefined;
 document.getElementById('btn-auto').onclick    = () => S().toggleAuto();
 document.getElementById('btn-live').onclick    = () => S().exitReview();
 
+/* ---------- 棋谱保存 / 导入 ---------- */
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btn-save').onclick = function () {
+  const n = S().historyCount();
+  if (!n) { SFX.deny(); S().setStatus('还没有落子，无需保存'); return; }
+  download('gomoku_' + stamp() + '.json', S().buildJSON(), 'application/json');
+  S().setStatus('已保存 JSON 棋谱（' + n + ' 手）');
+  SFX.tone(880, 0.12, 'sine', 0.22);
+};
+
+document.getElementById('btn-sgf').onclick = function () {
+  const n = S().historyCount();
+  if (!n) { SFX.deny(); S().setStatus('还没有落子，无需保存'); return; }
+  download('gomoku_' + stamp() + '.sgf', S().buildSGF(), 'application/x-go-sgf');
+  S().setStatus('已保存 SGF 棋谱（' + n + ' 手）');
+  SFX.tone(988, 0.12, 'sine', 0.22);
+};
+
+document.getElementById('btn-import').onclick = function () {
+  document.getElementById('file-input').click();
+};
+
+document.getElementById('file-input').addEventListener('change', function (e) {
+  const f = e.target.files && e.target.files[0];
+  if (!f) { return; }
+  const rd = new FileReader();
+  rd.onload = function () {
+    const err = S().importJSON(String(rd.result || ''));
+    if (err) { SFX.deny(); S().setStatus('导入失败：' + err); return; }
+    SFX.tone(784, 0.12, 'sine', 0.22);
+  };
+  rd.onerror = function () { S().setStatus('读取文件失败'); };
+  rd.readAsText(f, 'UTF-8');
+  e.target.value = '';
+});
+
 /* 点击棋谱某一手 → 跳到该局面 */
-document.getElementById('movelist').addEventListener('click', e => {
+document.getElementById('movelist').addEventListener('click', (e) => {
   const item = e.target.closest('.mv');
-  if (item) S().enterReview(parseInt(item.dataset.i, 10));
+  if (item) { S().enterReview(parseInt(item.dataset.i, 10)); }
 });
 
 /* 键盘 ← → 复盘 */
-document.addEventListener('keydown', e => {
+document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft')  { e.preventDefault(); S().stepReview(-1); }
   if (e.key === 'ArrowRight') { e.preventDefault(); S().stepReview(1); }
 });
@@ -502,7 +712,7 @@ const btnSound = document.getElementById('btn-sound');
 btnSound.onclick = () => {
   SFX.enabled = !SFX.enabled;
   btnSound.textContent = SFX.enabled ? '🔊 音效：开' : '🔇 音效：关';
-  if (SFX.enabled) SFX.tone(600, 0.12, 'sine', 0.2);
+  if (SFX.enabled) { SFX.tone(600, 0.12, 'sine', 0.2); }
 };
 </script>
 </body>
