@@ -74,7 +74,7 @@
       <p>
         · 棋盘 6×12，双方各 25 枚棋子，各自布阵于本方 6×5 区域（行营格不可放子）。<br/>
         · 军旗只能放在<b>大本营</b>（底线中间两格）；地雷只能放在本方最后两排。<br/>
-        · 官子大小：司令&gt;军长&gt;师长&gt;旅长&gt;团长&gt;营长&gt;连长&gt;排长&gt;工兵；同归于尽。<br/>
+        · 官子大小：司令&gt;军长&gt;师长&gt;旅长&gt;团长&gt;营长&gt;连长&gt;排长&gt;工兵；相同则同归于尽。<br/>
         · 工兵可排地雷；炸弹与任何子相撞同归于尽；地雷、炸弹、军旗不能移动。<br/>
         · <b>行营</b>（绿色格）内的棋子不可被攻击；铁路（浅色格）上工兵可沿直线任意格行走（不能越过棋子）。<br/>
         · 暗棋规则：对方未交战过的棋子显示为“？”，交战后双方永久明示。<br/>
@@ -133,14 +133,14 @@ const nm=p=>`${p.owner==='red'?'红':'蓝'}${PIECES[p.type].name}`;
 /* ============ 2. 状态 ============ */
 let board=[], state=null, scene=null;
 
-function newState(mode,human){
+function newState(mode,human,phase){
   board=Array.from({length:ROWS},()=>Array(COLS).fill(null));
   const reserve={red:{},blue:{}};
   INITIAL.forEach(([t,n])=>{reserve.red[t]=n;reserve.blue[t]=n;});
   state={
     mode,human,aiSide:other(human),
     difficulty:(document.getElementById('diff')||{value:'normal'}).value,
-    phase:'place',turn:'red',
+    phase:phase||'place',turn:'red',
     placingSide:(mode==='ai')?human:'red',
     selType:null,sel:null,legal:[],
     reserve,cap:{red:[],blue:[]},mem:{red:{},blue:{}},log:[]
@@ -172,7 +172,7 @@ function legalMoves(r,c){
     if(t&&isCamp(nr,nc))continue;          // 行营内不可被攻击
     push(nr,nc,!!t);
   }
-  if(p.type==='engineer'&&isRail(r,c)){    // 工兵铁路直线行走
+  if(p.type==='engineer'&&isRail(r,c)){    // 工兵沿铁路直线行走
     for(const [dr,dc] of dirs){
       let nr=r+dr,nc=c+dc;
       while(nr>=0&&nr<ROWS&&nc>=0&&nc<COLS&&isRail(nr,nc)){
@@ -347,9 +347,9 @@ class Main extends Phaser.Scene{
     this.hlLayer=this.add.container(0,0);
     this.fxLayer=this.add.container(0,0);
     this.menuText=this.add.text(W/2,H/2,'请选择右侧对战模式',{fontSize:'22px',color:'#dfe7f1',fontFamily:'system-ui'}).setOrigin(0.5);
-    this.busy=false;
+    this.busy=false;this.pending=null;
     this.input.on('pointerdown',p=>this.onPointer(p));
-    newState('ai','red');
+    newState('ai','red','menu');
     this.redraw();
   }
 
