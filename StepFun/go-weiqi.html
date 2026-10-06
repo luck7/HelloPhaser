@@ -17,7 +17,8 @@
   h1{ font-size:20px; margin:0 0 4px; letter-spacing:3px; }
   .sub{ font-size:12px; opacity:.6; margin-bottom:12px; }
   #game{ border-radius:12px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.6); }
-  #panel{ width:300px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  #panel{ width:300px; flex:0 0 300px; background:var(--panel); border:1px solid var(--line);
+          border-radius:12px; padding:16px; }
   .row{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
   button,select{
     background:linear-gradient(#4a3a28,#382b1d); color:var(--text); border:1px solid #6b5334;
@@ -37,12 +38,21 @@
   summary{ cursor:pointer; color:var(--accent); margin-bottom:6px; }
   kbd{ background:#4a3a28; border:1px solid #6b5334; border-radius:4px; padding:0 4px; font-size:11px; }
 
-  /* ---- 棋谱 ---- */
-  #recordWrap{ margin-top:4px; border:1px solid var(--line); border-radius:8px; background:#2a2118; }
-  #recordHead{ display:flex; justify-content:space-between; align-items:center;
-               padding:7px 10px; font-size:12px; color:#c9a877; border-bottom:1px solid var(--line); }
-  #recordList{ display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:6px;
-               max-height:216px; overflow-y:auto; }
+  /* ---- 棋谱：整体固定尺寸，内部三段式（标题 / 可滚动列表 / 导航）---- */
+  #recordWrap{
+    height:344px;                     /* 固定总高，不随手数变化 */
+    display:flex; flex-direction:column; overflow:hidden;
+    margin-top:4px; border:1px solid var(--line); border-radius:8px; background:#2a2118;
+  }
+  #recordHead{
+    flex:0 0 auto; display:flex; justify-content:space-between; align-items:center;
+    padding:7px 10px; font-size:12px; color:#c9a877; border-bottom:1px solid var(--line);
+  }
+  #recordList{
+    flex:1 1 auto; min-height:0;        /* 关键：允许在固定高度内收缩并滚动 */
+    display:grid; grid-template-columns:1fr 1fr; align-content:start; gap:2px; padding:6px;
+    overflow-y:auto; overscroll-behavior:contain;
+  }
   #recordList::-webkit-scrollbar{ width:8px; }
   #recordList::-webkit-scrollbar-thumb{ background:#5a452c; border-radius:4px; }
   .mv{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; padding:4px 6px;
@@ -52,8 +62,8 @@
   .mv .b{ color:#f3e6cf; } .mv .w{ color:#b9b9b9; }
   .mv .cap{ color:#8fd08f; margin-left:4px; font-size:11px; }
   .mv.cur{ background:#4a3a28; border-color:var(--accent); }
-  .mv.empty{ color:#7a6a52; cursor:default; }
-  .nav{ display:flex; gap:4px; padding:6px; border-top:1px solid var(--line); }
+  .mv.empty{ grid-column:1 / -1; color:#7a6a52; text-align:center; cursor:default; padding-top:12px; }
+  .nav{ flex:0 0 auto; display:flex; gap:4px; padding:6px; border-top:1px solid var(--line); }
   .nav button{ flex:1; padding:6px 0; font-size:13px; }
 </style>
 </head>
