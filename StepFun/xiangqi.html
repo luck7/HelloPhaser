@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中国象棋 · Phaser 3</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg, #2b2b2b 0%, #1a1a1a 100%);
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #eee;
+  }
+  #game { box-shadow: 0 10px 40px rgba(0,0,0,.6); border-radius: 8px; overflow: hidden; }
+  .controls { margin-top: 14px; display: flex; gap: 12px; }
+  button {
+    padding: 10px 22px;
+    font-size: 15px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #c0392b;
+    color: #fff;
+    transition: transform .12s ease, background .12s ease;
+  }
+  button:hover { background: #e05a4a; transform: translateY(-2px); }
+  button.secondary { background: #34495e; }
+  button.secondary:hover { background: #46637f; }
+  .tip { margin-top: 10px; font-size: 13px; color: #aaa; }
+</style>
+</head>
+<body>
+  <div id="game"></div>
+  <div class="controls">
+    <button onclick="window.xiangqi.restart()">重新开始</button>
+    <button class="secondary" onclick="window.xiangqi.undo()">悔棋</button>
+  </div>
+  <div class="tip">点击自己的棋子选中，绿点为可走位置，红圈为可吃子；再点目标位置落子。</div>
+
+  <!-- Phaser CDN（带备用源） -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>window.Phaser || document.write('<script src="https://unpkg.com/phaser@3.80.1/dist/phaser.min.js"><\/script>');</script>
+
+  <script>
+  /* ================= 基础常量 ================= */
+  const COLS = 9, ROWS = 10;          // 9 列 × 10 行交叉点
+  const CELL = 60;                    // 格距
+  const MARGIN_X = 55, MARGIN_Y = 80; // 棋盘左上角偏移
+  const RED = 'red', BLACK = 'black';
+
+  const RED_NAME   = { R:'車', N:'馬', B:'相', A:'仕', K:'帥', C:'炮', P:'兵' };
+  const BLACK_NAME = { R:'車', N:'馬', B:'象', A:'士', K:'將', C:'炮', P:'卒' };
+
+  /* ================= 游戏状态 ================= */
+  let pieces = [];
+  let currentSide = RED;
+  let history = [];
+  let selected = null;      // {x,y}
+  let legalTargets = [];    // [{x,y}]
+  let gameOver = false;
+  let statusMsg = '';
+
+  function initialPieces() {
+    const back = ['R','N','B','A','K','A','B','N','R'];
+    const arr = [];
+    let id = 0;
+    const push = (type, side, x, y) =>
+      arr.push({ id: id++, type, side, x, y,
+        name: side === RED ? RED_NAME[type] : BLACK_NAME[type] });
+
+    // 黑方（上方）
+    back.forEach((t, i) => push(t, BLACK, i, 0));
+    push('C', BLACK, 1, 2); push('C', BLACK, 7, 2);
+    for (let i = 0; i < 9; i += 2) push('P', BLACK, i, 3);
+
+    // 红方（下方）
+    back.forEach((t, i) => push(t, RED, i, 9));
+    push('C', RED, 1, 7); push('C', RED, 7, 7);
+    for (let i = 0; i < 9; i += 2) push('P', RED, i, 6);
+
+    return arr;
+  }
+
+  function resetGame() {
+    pieces = initialPieces();
+    currentSide = RED;
+    history = [];
+    selected = null;
+    legalTargets = [];
+    gameOver = false;
+    statusMsg = '';
+  }
+
+  /* ================= 规则逻辑 ================= */
+  function inBoard(x, y) { return x >= 0 && x < COLS && y >= 0 && y < ROWS; }
+  function pieceAt(x, y) { return pieces.find(p => p.x === x && p.y === y) || null; }
+  function kingPos(side) { return pieces.find(p => p.type === 'K' && p.side === side); }
+  function inPalace(x, y, side) {
+    if (x < 3 || x > 5) return false;
+    return side === BLACK ? (y >= 0 && y <= 2) : (y >= 7 && y <= 9);
+  }
+
+  // 该棋子所有“伪合法”目标点（不考虑是否送将）
+  function pseudoMoves(p) {
+    const res = [];
+    const x = p.x, y = p.y;
+    const enemy = p.side === RED ? BLACK : RED;
+    const add = (tx, ty) => {
+      if (!inBoard(tx, ty)) return;
+      const t = pieceAt(tx, ty);
+      if (!t || t.side === enemy) res.push({ x: tx, y: ty });
+    };
+
+    switch (p.type) {
+      case 'K': { // 帥/將：九宫内直走一步
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const tx = x + dx, ty = y + dy;
+          if (inPalace(tx, ty, p.side)) add(tx, ty);
+        }
+        break;
+      }
+      case 'A': { // 仕/士：九宫内斜走一步
+        for (const [dx, dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]) {
+          const tx = x + dx, ty = y + dy;
+          if (inPalace(tx, ty, p.side)) add(tx, ty);
+        }
+        break;
+      }
+      case 'B': { // 相/象：田字，不过河，塞象眼
+        for (const [dx, dy] of [[2,2],[2,-2],[-2,2],[-2,-2]]) {
+          const tx = x + dx, ty = y + dy;
+          if (!inBoard(tx, ty)) continue;
+          if (p.side === RED && ty < 5) continue;
+          if (p.side === BLACK && ty > 4) continue;
+          if (pieceAt(x + dx / 2, y + dy / 2)) continue;
+          add(tx, ty);
+        }
+        break;
+      }
+      case 'N': { // 馬：日字，蹩马腿
+        const mv = [[1,2,1,0],[2,1,0,1],[-1,2,-1,0],[-2,1,0,1],
+                    [1,-2,1,0],[2,-1,0,-1],[-1,-2,-1,0],[-2,-1,0,-1]];
+        for (const [dx, dy, lx, ly] of mv) {
+          const tx = x + dx, ty = y + dy;
+          if (!inBoard(tx, ty)) continue;
+          if (pieceAt(x + lx, y + ly)) continue;
+          add(tx, ty);
+        }
+        break;
+      }
+      case 'R': { // 車：直线，遇子停止（可吃敌子）
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          let tx = x + dx, ty = y + dy;
+          while (inBoard(tx, ty)) {
+            const t = pieceAt(tx, ty);
+            if (!t) res.push({ x: tx, y: ty });
+            else { if (t.side === enemy) res.push({ x: tx, y: ty }); break; }
+            tx += dx; ty += dy;
+          }
+        }
+        break;
+      }
+      case 'C': { // 炮：移动同車；吃子需隔一炮架
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          let tx = x + dx, ty = y + dy;
+          while (inBoard(tx, ty) && !pieceAt(tx, ty)) {
+            res.push({ x: tx, y: ty });
+            tx += dx; ty += dy;
+          }
+          if (!inBoard(tx, ty)) continue;
+          tx += dx; ty += dy;               // 跳过炮架
+          while (inBoard(tx, ty)) {
+            const t = pieceAt(tx, ty);
+            if (t) { if (t.side === enemy) res.push({ x: tx, y: ty }); break; }
+            tx += dx; ty += dy;
+          }
+        }
+        break;
+      }
+      case 'P': { // 兵/卒：向前一步；过河后可横走
+        const fwd = p.side === RED ? -1 : 1;
+        add(x, y + fwd);
+        const crossed = p.side === RED ? (y <= 4) : (y >= 5);
+        if (crossed) { add(x - 1, y); add(x + 1, y); }
+        break;
+      }
+    }
+    return res;
+  }
+
+  // 某方是否被将军（含双将照面）
+  function isInCheck(side) {
+    const k = kingPos(side);
+    if (!k) return true;
+    const enemy = side === RED ? BLACK : RED;
+    for (const p of pieces) {
+      if (p.side !== enemy) continue;
+      if (pseudoMoves(p).some(m => m.x === k.x && m.y === k.y)) return true;
+    }
+    const ok = kingPos(enemy);
+    if (ok && ok.x === k.x) {
+      let blocked = false;
+      for (let y = Math.min(k.y, ok.y) + 1; y < Math.max(k.y, ok.y); y++) {
+        if (pieceAt(k.x, y)) { blocked = true; break; }
+      }
+      if (!blocked) return true;
+    }
+    return false;
+  }
+
+  // 过滤掉会导致自己被将/照面的走法
+  function legalMovesFor(p) {
+    const out = [];
+    for (const m of pseudoMoves(p)) {
+      const captured = pieceAt(m.x, m.y);
+      const ox = p.x, oy = p.y;
+      p.x = m.x; p.y = m.y;
+      if (captured) pieces.splice(pieces.indexOf(captured), 1);
+      const bad = isInCheck(p.side);
+      p.x = ox; p.y = oy;
+      if (captured) pieces.push(captured);
+      if (!bad) out.push(m);
+    }
+    return out;
+  }
+
+  function allLegalMoves(side) {
+    const out = [];
+    for (const p of pieces) {
+      if (p.side === side) for (const m of legalMovesFor(p)) out.push(m);
+    }
+    return out;
+  }
+
+  function tryMove(tx, ty) {
+    if (!selected) return;
+    const p = pieceAt(selected.x, selected.y);
+    if (!p) return;
+    if (!legalTargets.some(t => t.x === tx && t.y === ty)) return;
+
+    const captured = pieceAt(tx, ty);
+    const fromX = p.x, fromY = p.y;
+    if (captured) pieces.splice(pieces.indexOf(captured), 1);
+    p.x = tx; p.y = ty;
+
+    history.push({ piece: p, fromX, fromY, toX: tx, toY: ty, captured, prevSide: currentSide });
+    currentSide = currentSide === RED ? BLACK : RED;
+    selected = null;
+    legalTargets = [];
+
+    if (allLegalMoves(currentSide).length === 0) {
+      gameOver = true;
+      statusMsg = (isInCheck(currentSide) ? '将死！' : '困毙！') +
+                  (currentSide === RED ? '黑方胜利' : '红方胜利');
+    } else if (isInCheck(currentSide)) {
+      statusMsg = (currentSide === RED ? '红方' : '黑方') + '被将军！';
+    } else {
+      statusMsg = '';
+    }
+  }
+
+  function undo() {
+    if (!history.length) return;
+    const last = history.pop();
+    last.piece.x = last.fromX;
+    last.piece.y = last.fromY;
+    if (last.captured) pieces.push(last.captured);
+    currentSide = last.prevSide;
+    selected = null;
+    legalTargets = [];
+    gameOver = false;
+    statusMsg = '';
+  }
+
+  /* ================= Phaser 场景 ================= */
+  class MainScene extends Phaser.Scene {
+    constructor() { super('main'); }
+
+    create() {
+      this.boardG  = this.add.graphics();
+      this.markG   = this.add.graphics();
+      this.hlG     = this.add.graphics();
+      this.pieceLayer = this.add.container(0, 0);
+
+      this.add.text(300, 26, '中国象棋', {
+        fontFamily: 'KaiTi, STKaiti, SimKai, serif',
+        fontSize: '30px', color: '#f5d7a1'
+      }).setOrigin(0.5);
+
+      this.sideText = this.add.text(300, 660, '', {
+        fontFamily: 'Microsoft YaHei, sans-serif', fontSize: '18px', color: '#dddddd'
+      }).setOrigin(0.5);
+
+      this.drawBoardStatic();
+      resetGame();
+      this.redraw();
+
+      this.input.on('pointerdown', this.onPointerDown, this);
+
+      window.xiangqi = {
+        restart: () => { resetGame(); this.redraw(); },
+        undo:    () => { undo();    this.redraw(); }
+      };
+    }
+
+    gridToPixel(x, y) {
+      return { px: MARGIN_X + x * CELL, py: MARGIN_Y + y * CELL };
+    }
+
+    /* ---- 静态棋盘 ---- */
+    drawBoardStatic() {
+      const g = this.boardG;
+      g.clear();
+
+      // 横线
+      g.lineStyle(2, 0x6b4f35, 1);
+      for (let y = 0; y < ROWS; y++)
+        g.lineBetween(MARGIN_X, MARGIN_Y + y * CELL, MARGIN_X + 8 * CELL, MARGIN_Y + y * CELL);
+
+      // 竖线（中间留出楚河汉界）
+      for (let x = 0; x < COLS; x++) {
+        const px = MARGIN_X + x * CELL;
+        if (x === 0 || x === 8) {
+          g.lineBetween(px, MARGIN_Y, px, MARGIN_Y + 9 * CELL);
+        } else {
+          g.lineBetween(px, MARGIN_Y, px, MARGIN_Y + 4 * CELL);
+          g.lineBetween(px, MARGIN_Y + 5 * CELL, px, MARGIN_Y + 9 * CELL);
+        }
+      }
+
+      // 外框
+      g.lineStyle(3, 0x6b4f35, 1);
+      g.strokeRect(MARGIN_X - 7, MARGIN_Y - 7, 8 * CELL + 14, 9 * CELL + 14);
+
+      // 九宫斜线
+      g.lineStyle(1.5, 0x6b4f35, 1);
+      g.lineBetween(MARGIN_X + 3 * CELL, MARGIN_Y,             MARGIN_X + 5 * CELL, MARGIN_Y + 2 * CELL);
+      g.lineBetween(MARGIN_X + 5 * CELL, MARGIN_Y,             MARGIN_X + 3 * CELL, MARGIN_Y + 2 * CELL);
+      g.lineBetween(MARGIN_X + 3 * CELL, MARGIN_Y + 7 * CELL,  MARGIN_X + 5 * CELL, MARGIN_Y + 9 * CELL);
+      g.lineBetween(MARGIN_X + 5 * CELL, MARGIN_Y + 7 * CELL,  MARGIN_X + 3 * CELL, MARGIN_Y + 9 * CELL);
+
+      // 楚河汉界
+      const riverStyle = { fontFamily: 'KaiTi, STKaiti, SimKai, serif', fontSize: '30px', color: '#6b4f35' };
+      this.add.text(MARGIN_X + 2 * CELL, MARGIN_Y + 4.5 * CELL, '楚  河', riverStyle).setOrigin(0.5);
+      this.add.text(MARGIN_X + 6 * CELL, MARGIN_Y + 4.5 * CELL, '漢  界', riverStyle).setOrigin(0.5);
+
+      // 兵/炮位标记
+      const m = this.markG;
+      m.clear();
+      for (const [x, y] of [[1,2],[7,2],[1,7],[7,7]]) this.drawMark(m, x, y);
+      for (const [x, y] of [[0,3],[2,3],[4,3],[6,3],[8,3],[0,6],[2,6],[4,6],[6,6],[8,6]]) this.drawMark(m, x, y);
+    }
+
+    drawMark(g, x, y) {
+      const px = MARGIN_X + x * CELL, py = MARGIN_Y + y * CELL;
+      const d = 6, len = 9;
+      g.lineStyle(1.5, 0x6b4f35, 1);
+      for (const [sx, sy] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+        const cx = px + sx * d, cy = py + sy * d;
+        if (cx < MARGIN_X || cx > MARGIN_X + 8 * CELL) continue;
+        if (cy < MARGIN_Y || cy > MARGIN_Y + 9 * CELL) continue;
+        g.lineBetween(cx, cy, cx + sx * len, cy);
+        g.lineBetween(cx, cy, cx, cy + sy * len);
+      }
+    }
+
+    /* ---- 动态重绘 ---- */
+    redraw() {
+      this.pieceLayer.removeAll(true);
+      this.hlG.clear();
+
+      for (const p of pieces) this.drawPiece(p);
+      this.drawHighlights();
+      this.updateStatus();
+    }
+
+    drawPiece(p) {
+      const { px, py } = this.gridToPixel(p.x, p.y);
+      const isRed = p.side === RED;
+      const main = isRed ? 0xc0392b : 0x2c3e50;
+      const g = this.add.graphics();
+      g.fillStyle(0xf6e3c0, 1);
+      g.lineStyle(2, main, 1);
+      g.fillCircle(0, 0, 26);
+      g.strokeCircle(0, 0, 26);
+      g.lineStyle(1, main, 1);
+      g.strokeCircle(0, 0, 21);
+
+      const t = this.add.text(0, 0, p.name, {
+        fontFamily: 'KaiTi, STKaiti, SimKai, serif',
+        fontSize: '27px', color: isRed ? '#c0392b' : '#2c3e50'
+      }).setOrigin(0.5);
+
+      this.pieceLayer.add(this.add.container(px, py, [g, t]));
+    }
+
+    drawHighlights() {
+      if (selected) {
+        const { px, py } = this.gridToPixel(selected.x, selected.y);
+        this.hlG.lineStyle(3, 0xf1c40f, 1);
+        this.hlG.strokeCircle(px, py, 30);
+      }
+      for (const t of legalTargets) {
+        const { px, py } = this.gridToPixel(t.x, t.y);
+        if (pieceAt(t.x, t.y)) {
+          this.hlG.lineStyle(3, 0xe74c3c, 1);
+          this.hlG.strokeCircle(px, py, 28);
+        } else {
+          this.hlG.fillStyle(0x2ecc71, 0.5);
+          this.hlG.fillCircle(px, py, 10);
+        }
+      }
+    }
+
+    updateStatus() {
+      let s;
+      if (gameOver) s = statusMsg;
+      else s = (currentSide === RED ? '红方' : '黑方') + '走棋' + (statusMsg ? '　·　' + statusMsg : '');
+      this.sideText.setText(s);
+    }
+
+    /* ---- 交互 ---- */
+    onPointerDown(pointer) {
+      if (gameOver) return;
+      const gx = Math.round((pointer.worldX - MARGIN_X) / CELL);
+      const gy = Math.round((pointer.worldY - MARGIN_Y) / CELL);
+      if (!inBoard(gx, gy)) return;
+
+      const cx = MARGIN_X + gx * CELL, cy = MARGIN_Y + gy * CELL;
+      if (Math.hypot(pointer.worldX - cx, pointer.worldY - cy) > CELL * 0.5) return;
+
+      const p = pieceAt(gx, gy);
+
+      if (selected) {
+        if (selected.x === gx && selected.y === gy) {           // 再点一次取消
+          selected = null; legalTargets = []; this.redraw(); return;
+        }
+        if (legalTargets.some(t => t.x === gx && t.y === gy)) {  // 落子
+          tryMove(gx, gy); this.redraw(); return;
+        }
+        if (p && p.side === currentSide) {                       // 改选
+          selected = { x: gx, y: gy };
+          legalTargets = legalMovesFor(p);
+          this.redraw(); return;
+        }
+        selected = null; legalTargets = []; this.redraw(); return; // 点空白取消
+      }
+
+      if (p && p.side === currentSide) {                         // 选中
+        selected = { x: gx, y: gy };
+        legalTargets = legalMovesFor(p);
+        this.redraw();
+      }
+    }
+  }
+
+  /* ================= 启动 ================= */
+  new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: 'game',
+    width: 600,
+    height: 720,
+    backgroundColor: '#e8d3ac',
+    scene: [MainScene]
+  });
+  </script>
+</body>
+</html>
