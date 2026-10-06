@@ -27,25 +27,35 @@
   <h1>TETRIS · PHASER 3</h1>
   <div id="game"></div>
   <div class="tips">
-    <kbd>←</kbd> <kbd>→</kbd> 移动 &nbsp;·&nbsp;
+    <kbd>←</kbd> <kbd>→</kbd> 移动（点一下走一格，长按 0.16 秒后连发） &nbsp;·&nbsp;
     <kbd>↑</kbd> / <kbd>X</kbd> 顺时针旋转 &nbsp;·&nbsp;
     <kbd>Z</kbd> 逆时针 &nbsp;·&nbsp;
     <kbd>↓</kbd> 软降 &nbsp;·&nbsp;
     <kbd>空格</kbd> 硬降 &nbsp;·&nbsp;
     <kbd>C</kbd> 暂存 &nbsp;·&nbsp;
     <kbd>P</kbd> 暂停 &nbsp;·&nbsp;
+    <kbd>M</kbd> 静音 &nbsp;·&nbsp;
     <kbd>R</kbd> 重开 &nbsp;·&nbsp; 手机可点屏幕下方按钮
   </div>
 </div>
 
 <script>
 /* =========================================================
+ *  手感配置：左右移动的「按键节奏」
+ *  DAS = Delayed Auto Shift：按住多久之后才开始连续移动
+ *  ARR = Auto Repeat Rate ：开始连发后，每步之间隔多久
+ *  （单位毫秒。想要更灵敏就调小，更稳重就调大）
+ * =======================================================*/
+const DAS = 160;   // 首次按下后，等这么久才启动连发 → 越大越不容易「一碰就飞」
+const ARR = 45;    // 连发时每步间隔 → 越小滑得越快（设成 0 会瞬间贴到墙）
+
+/* =========================================================
  *  常量配置：棋盘 10 列 × 20 行，每格 30px
  * =======================================================*/
 const COLS = 10, ROWS = 20, TILE = 30;
 const BOARD_X = 30, BOARD_Y = 30, SIDE_W = 190;
 const BOARD_W = COLS * TILE, BOARD_H = ROWS * TILE;
-const PAD_H = 74;                       // 底部触屏按钮区高度
+const PAD_H = 74;                       // 底部触屏按钮区的高度
 const W = BOARD_X * 2 + BOARD_W + SIDE_W;
 const H = BOARD_Y * 2 + BOARD_H + PAD_H;
 
@@ -62,6 +72,110 @@ const SHAPES = {
 const COLORS = { I: 0x22d3ee, J: 0x3b82f6, L: 0xf59e0b, O: 0xfacc15, S: 0x22c55e, T: 0xa855f7, Z: 0xef4444 };
 const TYPES = Object.keys(SHAPES);
 const LINE_SCORE = [0, 100, 300, 500, 800];
+
+/* =========================================================
+ *  音效引擎：用 Web Audio 实时合成 8-bit 音
+ *  类比：一台「电子琴」——不需要任何音频文件，
+ *        用振荡器（音高）+ 增益（音量包络）现场演奏
+ * =======================================================*/
+class SFX {
+  constructor() { this.ctx = null; this.muted = false; this.master = null; this._lastMove = -1; }
+
+  /* 浏览器要求「先有用户操作，才能播声音」，所以延迟到第一次交互时创建 */
+  ensure() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();      // 总线：统一控制总音量
+      this.master.gain.value = 0.5;
+      this.master.connect(this.ctx.destination);
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  }
+
+  /* 一个「音」：振荡器出波形 → 增益做淡入淡出 → 总线 */
+  tone(opt) {
+    if (this.muted) return;
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + (opt.delay || 0);
+    const dur = opt.dur || 0.08;
+
+    const osc = ctx.createOscillator();
+    osc.type = opt.type || 'square';                       // 方波最有「红白机味」
+    osc.frequency.setValueAtTime(opt.freq, t0);
+    if (opt.toFreq) osc.frequency.exponentialRampToValueAtTime(opt.toFreq, t0 + dur);
+
+    const gain = ctx.createGain();
+    const vol = (opt.vol == null ? 0.15 : opt.vol);
+    gain.gain.setValueAtTime(0.0001, t0);                   // 从极小值起，避免爆音
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    osc.connect(gain).connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+
+  /* 一小段白噪声：模拟「撞击 / 沙尘」 */
+  noise(opt) {
+    if (this.muted) return;
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const dur = opt.dur || 0.06;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = opt.cutoff || 900;
+    const gain = ctx.createGain();
+    gain.gain.value = opt.vol == null ? 0.12 : opt.vol;
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start();
+  }
+
+  /* ---------- 具体音效 ---------- */
+  move() {
+    // 连发时节流：每 50ms 最多响一声，否则会变成刺耳的「嘟嘟嘟嘟」
+    const now = this.ctx ? this.ctx.currentTime : -1;
+    if (now >= 0 && now - this._lastMove < 0.05) return;
+    this._lastMove = now;
+    this.tone({ freq: 170, type: 'square', dur: 0.035, vol: 0.05 });
+  }
+  rotate()    { this.tone({ freq: 320, type: 'triangle', dur: 0.055, vol: 0.09 }); }
+  wallKick()  { this.tone({ freq: 110, type: 'square',   dur: 0.05,  vol: 0.08 }); }
+  hold()      { this.tone({ freq: 520, type: 'sine',     dur: 0.07,  vol: 0.11 }); }
+  lock()      { this.tone({ freq: 130, toFreq: 90, type: 'square', dur: 0.08, vol: 0.10 });
+                this.noise({ dur: 0.05, cutoff: 700, vol: 0.08 }); }
+  hardDrop()  { this.tone({ freq: 700, toFreq: 110, type: 'sawtooth', dur: 0.13, vol: 0.13 }); }
+  /* 消行：上行琶音，消得越多音越多越亮 */
+  clear(n) {
+    const notes = [523, 659, 784, 1047, 1319];
+    for (let i = 0; i < n; i++)
+      this.tone({ freq: notes[i], type: 'square', dur: 0.11, vol: 0.13, delay: i * 0.06 });
+    if (n >= 4) this.tone({ freq: 1568, type: 'square', dur: 0.25, vol: 0.14, delay: 0.26 });
+  }
+  levelUp()   { [523, 698, 880].forEach((f, i) =>
+                  this.tone({ freq: f, type: 'square', dur: 0.12, vol: 0.12, delay: i * 0.09 })); }
+  pause()     { this.tone({ freq: 300, type: 'sine', dur: 0.09, vol: 0.10 }); }
+  gameOver()  { [440, 392, 330, 262, 196].forEach((f, i) =>
+                  this.tone({ freq: f, type: 'square', dur: 0.18, vol: 0.13, delay: i * 0.13 })); }
+  restart()   { [392, 523, 659, 784].forEach((f, i) =>
+                  this.tone({ freq: f, type: 'square', dur: 0.10, vol: 0.11, delay: i * 0.07 })); }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    if (!this.muted) { this.ensure(); this.tone({ freq: 660, type: 'sine', dur: 0.08, vol: 0.12 }); }
+    return this.muted;
+  }
+}
+const sfx = new SFX();
 
 /* =========================================================
  *  工具函数
@@ -95,6 +209,11 @@ class TetrisScene extends Phaser.Scene {
     this.input.keyboard.resetKeys();
     this.input.keyboard.addCapture(['UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']);
     this.input.addPointer(2);
+
+    /* 首次交互时「通电」音频上下文（浏览器自动播放策略） */
+    const unlock = () => sfx.ensure();
+    this.input.keyboard.on('keydown', unlock);
+    this.input.on('pointerdown', unlock);
 
     /* ---------- 棋盘背景与网格 ---------- */
     const g = this.add.graphics();
@@ -147,8 +266,10 @@ class TetrisScene extends Phaser.Scene {
     label(holdPanelY + 8, 'HOLD (C)');
     this.holdGfx = this.add.graphics();
 
-    // 说明
-    this.add.text(sx, holdPanelY + 104,
+    // 说明 + 声音状态
+    this.soundText = this.add.text(sx, holdPanelY + 104, 'SOUND: ON',
+      { fontFamily: 'monospace', fontSize: '12px', color: '#7dd3fc' });
+    this.add.text(sx, holdPanelY + 120,
       '← → 移动\n↑/X 旋转\nZ 逆转\n↓ 软降\n空格 硬降\nP 暂停  R 重开',
       { fontFamily: 'monospace', fontSize: '12px', color: '#5b6088', lineSpacing: 4 });
 
@@ -162,6 +283,7 @@ class TetrisScene extends Phaser.Scene {
     this.keySpace = this.input.keyboard.addKey('SPACE');
     this.keyC = this.input.keyboard.addKey('C');
     this.keyP = this.input.keyboard.addKey('P');
+    this.keyM = this.input.keyboard.addKey('M');
     this.keyR = this.input.keyboard.addKey('R');
 
     /* ---------- 触屏按钮 ---------- */
@@ -261,15 +383,21 @@ class TetrisScene extends Phaser.Scene {
   /* ---------------- 操作 ---------------- */
   move(dir) {
     if (this.over || this.paused) return;
-    if (!this.collides(this.piece.m, this.piece.x + dir, this.piece.y)) this.piece.x += dir;
+    if (!this.collides(this.piece.m, this.piece.x + dir, this.piece.y)) {
+      this.piece.x += dir;
+      sfx.move();
+    }
   }
 
   rotate(dir) {
     if (this.over || this.paused) return;
     const rm = rotateMatrix(this.piece.m, dir);
-    for (const k of [0, -1, 1, -2, 2]) {          // 简单的“踢墙”修正
+    for (const k of [0, -1, 1, -2, 2]) {          // 简单的「踢墙」修正
       if (!this.collides(rm, this.piece.x + k, this.piece.y)) {
-        this.piece.m = rm; this.piece.x += k; return;
+        const kicked = k !== 0;
+        this.piece.m = rm; this.piece.x += k;
+        kicked ? sfx.wallKick() : sfx.rotate();
+        return;
       }
     }
   }
@@ -290,6 +418,7 @@ class TetrisScene extends Phaser.Scene {
     let d = 0;
     while (!this.collides(this.piece.m, this.piece.x, this.piece.y + 1)) { this.piece.y++; d++; }
     this.score += d * 2;
+    sfx.hardDrop();
     this.lockPiece();
   }
 
@@ -306,6 +435,7 @@ class TetrisScene extends Phaser.Scene {
       this.spawnPiece();
     }
     this.canHold = false;
+    sfx.hold();
     this.drawPreview(this.holdGfx, this.holdType,
       BOARD_X + BOARD_W + 20 + 85, BOARD_Y + 288 + 50);
   }
@@ -328,7 +458,9 @@ class TetrisScene extends Phaser.Scene {
     const full = [];
     for (let r = 0; r < ROWS; r++)
       if (this.grid[r].every(v => v)) full.push(r);
-    if (!full.length) return;
+    if (!full.length) { sfx.lock(); return; }
+
+    sfx.clear(full.length);                       // 立即出声，保持打击感
 
     // 闪一下白条，再真正消除
     const flash = this.add.graphics().setDepth(5);
@@ -340,11 +472,13 @@ class TetrisScene extends Phaser.Scene {
         this.grid.splice(r, 1);
         this.grid.unshift(new Array(COLS).fill(null));
       });
+      const before = this.level;
       this.lines += full.length;
       this.score += LINE_SCORE[full.length] * this.level;
       this.level = Math.floor(this.lines / 10) + 1;
       this.refreshCells();
       this.updateHUD();
+      if (this.level > before) sfx.levelUp();
     });
   }
 
@@ -405,6 +539,7 @@ class TetrisScene extends Phaser.Scene {
     this.overlayTitle.setText('GAME OVER');
     this.overlaySub.setText('得分 ' + this.score + ' · 按 R 重新开始');
     this.overlay.setVisible(true);
+    sfx.gameOver();
   }
 
   togglePause() {
@@ -417,6 +552,13 @@ class TetrisScene extends Phaser.Scene {
     } else {
       this.overlay.setVisible(false);
     }
+    sfx.pause();
+  }
+
+  toggleMute() {
+    const muted = sfx.toggleMute();
+    this.soundText.setText('SOUND: ' + (muted ? 'OFF' : 'ON'))
+      .setColor(muted ? '#666b8a' : '#7dd3fc');
   }
 
   /* ---------------- 主循环 ---------------- */
@@ -424,17 +566,29 @@ class TetrisScene extends Phaser.Scene {
     return Math.max(80, 800 - (this.level - 1) * 70);   // 等级越高落得越快
   }
 
+  /* 左右移动手感控制（DAS/ARR）
+     类比：按电梯按钮——点一下，门立刻开一格（即时反馈）；
+     但按住不放要等 DAS 毫秒才开始连续开，之后每 ARR 毫秒开一格。
+     这样既能精确微调，又不会一碰就飞到墙边。 */
   repeat(name, isDown, delta, fn) {
     let st = this.repeatState[name];
-    if (!isDown) { this.repeatState[name] = { started: false, timer: 0 }; return; }
-    if (!st) st = this.repeatState[name] = { started: false, timer: 0 };
-    if (!st.started) { st.started = true; st.timer = 0; fn(); return; }
+    if (!isDown) { this.repeatState[name] = null; return; }        // 松键立刻停
+    if (!st) { this.repeatState[name] = { phase: 'tap', timer: 0 }; fn(); return; }  // 刚按下：走一格
     st.timer += delta;
-    if (st.timer >= 55) { st.timer = 0; fn(); }
+    if (st.phase === 'tap') {
+      if (st.timer >= DAS) { st.phase = 'hold'; st.timer = 0; fn(); }  // 停顿结束，开始连发
+    } else if (st.timer >= ARR) {
+      st.timer = 0; fn();                                               // 连发中
+    }
   }
 
   update(time, delta) {
-    if (Phaser.Input.Keyboard.JustDown(this.keyR)) { this.scene.restart(); return; }
+    if (Phaser.Input.Keyboard.JustDown(this.keyR)) {
+      sfx.restart();
+      this.scene.restart();
+      return;
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.toggleMute();
     if (Phaser.Input.Keyboard.JustDown(this.keyP)) this.togglePause();
     if (this.over || this.paused) return;
 
