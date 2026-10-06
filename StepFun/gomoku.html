@@ -26,12 +26,20 @@
   .mv .coord { margin-left: auto; font-family: Consolas, monospace; font-weight: bold; color: #ffd479; }
   #empty { font-size: 13px; color: #6f7a89; text-align: center; padding: 30px 0; }
   .row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-  .row button { flex: 1; min-width: 66px; padding: 7px 4px; font-size: 13px; color: #fff; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.22); border-radius: 7px; cursor: pointer; transition: all .15s; }
+  .row button { flex: 1; min-width: 66px; padding: 7px 4px; font-size: 13px; cursor: pointer; color: #fff; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.22); border-radius: 7px; transition: all .15s; }
   .row button:hover { background: rgba(255,255,255,.22); }
   .row button:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* 底部按钮：深色毛玻璃（与棋谱面板按钮同风格） */
   #panel { margin: 14px 0 24px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-  #panel button { padding: 9px 22px; font-size: 14px; cursor: pointer; color: #fff; background: rgba(255,255,white,.1); border: 1px solid rgba(255,255,255,.25); border-radius: 8px; transition: all .18s; }
+  #panel button {
+    padding: 9px 22px; font-size: 14px; cursor: pointer;
+    color: #fff; background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.25); border-radius: 8px;
+    transition: all .18s;
+  }
   #panel button:hover { background: rgba(255,255,255,.22); transform: translateY(-1px); }
+
   .tip { font-size: 12px; color: #8b96a5; margin-bottom: 20px; }
   #file-input { display: none; }
 </style>
@@ -195,13 +203,13 @@ class GomokuScene extends Phaser.Scene {
       gfx.lineTo(this.px(i), this.px(SIZE - 1));
       gfx.strokePath();
     }
+    /* 外框四条边：上、下、左、右，全部显式写成横线或竖线（不用端点简写，杜绝斜线） */
     gfx.lineStyle(3, 0x5b3d17, 1);
-    [[0, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 1], [1, 0, 0, 1]].forEach((c) => {
-      gfx.beginPath();
-      gfx.moveTo(this.px(c[0] === 1 ? SIZE - 1 : 0), this.px(c[1] === 1 ? SIZE - 1 : 0));
-      gfx.lineTo(this.px(c[2] === 1 ? SIZE - 1 : 0), this.px(c[3] === 1 ? SIZE - 1 : 0));
-      gfx.strokePath();
-    });
+    gfx.beginPath(); gfx.moveTo(this.px(0), this.px(0)); gfx.lineTo(this.px(SIZE - 1), this.px(0)); gfx.strokePath();
+    gfx.beginPath(); gfx.moveTo(this.px(0), this.px(SIZE - 1)); gfx.lineTo(this.px(SIZE - 1), this.px(SIZE - 1)); gfx.strokePath();
+    gfx.beginPath(); gfx.moveTo(this.px(0), this.px(0)); gfx.lineTo(this.px(0), this.px(SIZE - 1)); gfx.strokePath();
+    gfx.beginPath(); gfx.moveTo(this.px(SIZE - 1), this.px(0)); gfx.lineTo(this.px(SIZE - 1), this.px(SIZE - 1)); gfx.strokePath();
+
     gfx.fillStyle(0x5b3d17, 1);
     [[3, 3], [3, 11], [11, 3], [11, 11], [7, 7]].forEach((p) => {
       gfx.fillCircle(this.px(p[0]), this.px(p[1]), 4);
