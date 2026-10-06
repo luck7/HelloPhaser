@@ -18,13 +18,14 @@
   .sub{ font-size:12px; opacity:.6; margin-bottom:12px; }
   #game{ border-radius:12px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.6); }
   #panel{ width:300px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
-  .row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .row{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
   button,select{
     background:linear-gradient(#4a3a28,#382b1d); color:var(--text); border:1px solid #6b5334;
-    border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer; transition:.15s;
+    border-radius:8px; padding:7px 10px; font-size:13px; cursor:pointer; transition:.15s;
   }
   button:hover,select:hover{ border-color:var(--accent); transform:translateY(-1px); }
-  button:disabled{ opacity:.4; cursor:not-allowed; transform:none; }
+  button:disabled{ opacity:.35; cursor:not-allowed; transform:none; }
+  button.on{ background:linear-gradient(#6b5220,#4a3818); border-color:var(--accent); color:#ffe9b8; }
   .info{ font-size:13px; line-height:1.9; background:#2a2118; border:1px solid var(--line);
          border-radius:8px; padding:10px 12px; margin-bottom:10px; }
   #msg{ min-height:20px; font-size:13px; color:var(--accent); margin-bottom:8px; }
@@ -35,6 +36,25 @@
   details{ font-size:12px; line-height:1.85; opacity:.85; }
   summary{ cursor:pointer; color:var(--accent); margin-bottom:6px; }
   kbd{ background:#4a3a28; border:1px solid #6b5334; border-radius:4px; padding:0 4px; font-size:11px; }
+
+  /* ---- 棋谱 ---- */
+  #recordWrap{ margin-top:4px; border:1px solid var(--line); border-radius:8px; background:#2a2118; }
+  #recordHead{ display:flex; justify-content:space-between; align-items:center;
+               padding:7px 10px; font-size:12px; color:#c9a877; border-bottom:1px solid var(--line); }
+  #recordList{ display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:6px;
+               max-height:216px; overflow-y:auto; }
+  #recordList::-webkit-scrollbar{ width:8px; }
+  #recordList::-webkit-scrollbar-thumb{ background:#5a452c; border-radius:4px; }
+  .mv{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; padding:4px 6px;
+       border-radius:4px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+       border:1px solid transparent; }
+  .mv:hover{ background:#3b2e21; }
+  .mv .b{ color:#f3e6cf; } .mv .w{ color:#b9b9b9; }
+  .mv .cap{ color:#8fd08f; margin-left:4px; font-size:11px; }
+  .mv.cur{ background:#4a3a28; border-color:var(--accent); }
+  .mv.empty{ color:#7a6a52; cursor:default; }
+  .nav{ display:flex; gap:4px; padding:6px; border-top:1px solid var(--line); }
+  .nav button{ flex:1; padding:6px 0; font-size:13px; }
 </style>
 </head>
 <body>
@@ -78,6 +98,25 @@
     <button id="btnSound">🔊 音效开</button>
   </div>
 
+  <div id="recordWrap">
+    <div id="recordHead">
+      <span>棋谱记录</span>
+      <span id="recordCount">0 手</span>
+    </div>
+    <div id="recordList"><div class="mv empty">暂无落子</div></div>
+    <div class="nav">
+      <button id="btnFirst" title="第一手 Home">⏮</button>
+      <button id="btnPrev" title="上一步 ←">◀</button>
+      <button id="btnReview" title="进入/退出复盘 R">复盘</button>
+      <button id="btnNext" title="下一步 →">▶</button>
+      <button id="btnLast" title="最后一手 End">⏭</button>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:10px">
+    <button id="btnExport">导出棋谱</button>
+  </div>
+
   <details>
     <summary>规则速记（点击展开）</summary>
     <p><b>气</b>：棋子上下左右紧邻的空交叉点。同色棋子相连成一“块”，共享气。</p>
@@ -85,6 +124,7 @@
     <p><b>禁自杀</b>：落子后自己这块气为 0 且没有提子，禁着。</p>
     <p><b>打劫</b>：刚形成的棋盘局面不能立刻重现（全局同形禁着），防止无限循环。</p>
     <p><b>终局</b>：双方连续停一手即终局，按中国规则数子（黑贴 3.75 子）。</p>
+    <p><b>复盘</b>：点「复盘」进入，← → 逐手，Home/End 首尾，点棋谱任一手可直接跳转；再点「复盘」退出回到当前局面。</p>
   </details>
 </div>
 
@@ -113,7 +153,6 @@ class Sfx {
     this.ctx = null; this.master = null; this.enabled = true;
     try { this.enabled = localStorage.getItem('weiqi_sound') !== 'off'; } catch (e) {}
   }
-  // 懒加载：优先复用 Phaser 的 AudioContext
   ensure() {
     if (this.ctx) return this.ctx;
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -133,7 +172,6 @@ class Sfx {
     try { localStorage.setItem('weiqi_sound', v ? 'on' : 'off'); } catch (e) {}
     if (this.master) this.master.gain.value = v ? 0.7 : 0;
   }
-  /* 单个乐音：可滑音、可延迟 */
   blip(freq, opts) {
     try {
       const ctx = this.ensure(); if (!ctx) return;
@@ -152,7 +190,6 @@ class Sfx {
       osc.start(t0); osc.stop(t0 + dur + 0.03);
     } catch (e) {}
   }
-  /* 带通噪声：木头敲击的“咔”声 */
   noise(opts) {
     try {
       const ctx = this.ensure(); if (!ctx) return;
@@ -172,31 +209,25 @@ class Sfx {
       src.start(t0);
     } catch (e) {}
   }
-  /* 落子：木质感敲击 */
   stone() {
     const d = 0.93 + Math.random() * 0.14;
     this.noise({ dur: 0.045, gain: 0.5, freq: 2100 * d });
     this.blip(300 * d, { type: 'sine', dur: 0.09, gain: 0.3, glideTo: 105 * d });
   }
-  /* 提子：连声 + 清音提示 */
   capture(n) {
     this.stone();
     for (let i = 0; i < Math.min(n, 4); i++) this.noise({ dur: 0.05, gain: 0.26, freq: 2600, delay: 0.07 + i * 0.05 });
     this.blip(880, { type: 'triangle', dur: 0.18, gain: 0.13, delay: 0.06 });
   }
-  /* 禁着：低沉否定音 */
   deny() { this.blip(120, { type: 'square', dur: 0.17, gain: 0.14, glideTo: 78 }); }
-  /* 停一手：气声 */
   pass() { this.blip(520, { type: 'sine', dur: 0.22, gain: 0.11, glideTo: 360 }); }
-  /* 悔棋：下行回退 */
   undo() {
     this.blip(430, { type: 'triangle', dur: 0.12, gain: 0.13, glideTo: 190 });
     this.blip(300, { type: 'triangle', dur: 0.11, gain: 0.1, glideTo: 140, delay: 0.08 });
   }
-  /* 终局：上行琶音 */
+  tick() { this.blip(720, { type: 'sine', dur: 0.05, gain: 0.07 }); }        // 复盘翻页
   finish() { [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
     this.blip(f, { type: 'triangle', dur: 0.3, gain: 0.15, delay: i * 0.11 })); }
-  /* 新对局：两声轻提示 */
   start() {
     this.blip(392, { type: 'sine', dur: 0.18, gain: 0.13 });
     this.blip(587.33, { type: 'sine', dur: 0.22, gain: 0.11, delay: 0.1 });
@@ -220,6 +251,8 @@ class GoScene extends Phaser.Scene {
     this.showTerritory = false;
     this.scoreResult = null;
     this.busy = false;
+    this.review = false;      // 是否处于复盘模式
+    this.step = null;         // 复盘查看的手数（null = 当前局面）
 
     // 图层用 setDepth 显式分层，顺序不再依赖创建先后
     //   0 棋盘(静态)  1 领地  2 棋子  3 最后一手标记  4 悬停预览  5 坐标号
@@ -234,6 +267,7 @@ class GoScene extends Phaser.Scene {
     this.createLabels();   // depth 5
 
     this.input.on('pointerdown', p => {
+      if (this.review) return;                       // 复盘模式禁止落子
       const pt = this.pointFromPixel(p.x, p.y);
       if (!pt) return;
       if (this.mode !== 'pvp' && this.turn === this.aiColor()) return; // 电脑回合屏蔽点击
@@ -249,6 +283,9 @@ class GoScene extends Phaser.Scene {
   pos(i) { return this.margin + i * this.cell; }
   px(c) { return this.pos(c); }
   py(r) { return this.pos(r); }
+
+  // 棋盘坐标 → 记谱文本，如 Q16
+  coordLabel(r, c) { return COLS[c] + (this.n - r); }
 
   pointFromPixel(x, y) {
     const n = this.n, c = this.cell;
@@ -269,7 +306,6 @@ class GoScene extends Phaser.Scene {
   }
 
   /* ---------- 核心规则 ---------- */
-  // 找出一块棋：返回 { stones:[[r,c]...], liberties:气数 }
   group(r, c) {
     const color = this.board[r][c];
     const seen = new Set([r + ',' + c]);
@@ -313,6 +349,7 @@ class GoScene extends Phaser.Scene {
 
   placeStone(r, c) {
     if (this.gameOver) return this.flash('对局已结束，请开始新对局');
+    if (this.review) return this.flash('复盘模式中，先退出复盘');
     const color = this.turn;
     const sim = this.simulate(r, c, color);
     if (!sim) { sfx.deny(); return this.flash('禁着点：这里落子会自杀'); }
@@ -330,6 +367,9 @@ class GoScene extends Phaser.Scene {
       lastMove: this.lastMove, passes: this.passes, key
     });
 
+    // 记谱：只存「谁 + 落在哪 + 提了谁」，复盘时按顺序重放即可
+    this.moves.push({ color, r, c, pass: false, captured: sim.stones.slice() });
+
     this.lastMove = { r, c };
     this.passes = 0;
     this.spawnStone(r, c, color);
@@ -341,21 +381,25 @@ class GoScene extends Phaser.Scene {
     this.drawMarker();
     this.hideHover();
     this.refresh();
+    this.renderRecord();
     this.afterMove();
   }
 
   pass() {
     if (this.gameOver) return this.flash('对局已结束，请开始新对局');
+    if (this.review) return this.flash('复盘模式中，先退出复盘');
     const color = this.turn;
     this.history.push({
       board: this.board.map(row => row.slice()), turn: color,
       captured: { ...this.captured }, lastMove: this.lastMove, passes: this.passes, key: null
     });
+    this.moves.push({ color, r: -1, c: -1, pass: true, captured: [] });
     this.passes++;
     this.lastMove = null;
     this.turn = other(color);
     this.drawMarker();
     this.refresh();
+    this.renderRecord();
     sfx.pass();
     this.flash((color === BLACK ? '黑' : '白') + '方停一手');
     this.afterMove();
@@ -379,6 +423,7 @@ class GoScene extends Phaser.Scene {
 
   undo() {
     if (!this.history.length) { sfx.deny(); return this.flash('没有可悔的棋'); }
+    this.exitReview(true);                            // 悔棋前先退出复盘
     const target = this.mode === 'pvp' ? null : this.humanColor();
     this.undoOnce();
     while (target && this.history.length && this.turn !== target) this.undoOnce();
@@ -391,6 +436,7 @@ class GoScene extends Phaser.Scene {
     this.redrawStones();
     this.drawMarker();
     this.refresh();
+    this.renderRecord();
     sfx.undo();
     this.flash('已悔棋');
     // 悔棋后若轮到电脑，让它继续走
@@ -403,12 +449,60 @@ class GoScene extends Phaser.Scene {
   undoOnce() {
     const h = this.history.pop();
     if (!h) return;
+    this.moves.pop();                                  // 棋谱与历史一一对应
     if (h.key) this.histKeys.delete(h.key);
     this.board = h.board.map(row => row.slice());
     this.turn = h.turn;
     this.captured = { ...h.captured };
     this.lastMove = h.lastMove;
     this.passes = h.passes;
+  }
+
+  /* ---------- 复盘：按前 step 手重放，得到该时刻的局面 ---------- */
+  applyMovesTo(step) {
+    const n = this.n;
+    this.board = Array.from({ length: n }, () => Array(n).fill(EMPTY));
+    const cap = { [BLACK]: 0, [WHITE]: 0 };
+    const last = step > 0 ? this.moves[step - 1] : null;
+    for (let i = 0; i < step; i++) {
+      const mv = this.moves[i];
+      if (mv.pass) continue;
+      this.board[mv.r][mv.c] = mv.color;
+      for (const [cr, cc] of mv.captured) this.board[cr][cc] = EMPTY;
+      cap[mv.color] += mv.captured.length;
+    }
+    this.captured = cap;
+    this.lastMove = (last && !last.pass) ? { r: last.r, c: last.c } : null;
+  }
+
+  enterReview() {
+    if (!this.moves.length) { sfx.deny(); return this.flash('还没有落子，无从复盘'); }
+    this.review = true;
+    this.setStep(this.moves.length);          // 默认从最后一手看起
+    this.flash('复盘模式：← → 逐手，Home/End 首尾');
+  }
+
+  exitReview(silent) {
+    if (!this.review) return;
+    this.review = false;
+    this.step = null;
+    this.applyMovesTo(this.moves.length);     // 回到当前真实局面
+    this.redrawStones();
+    this.drawMarker();
+    this.refresh();
+    this.renderRecord();
+    if (!silent) this.flash('已回到当前局面');
+  }
+
+  setStep(k) {
+    if (!this.review) return;
+    this.step = Phaser.Math.Clamp(k, 0, this.moves.length);
+    this.applyMovesTo(this.step);
+    this.redrawStones();
+    this.drawMarker();
+    this.refresh();
+    this.renderRecord();
+    sfx.tick();
   }
 
   /* ---------- 数地（中国规则 · 数子法） ---------- */
@@ -446,6 +540,7 @@ class GoScene extends Phaser.Scene {
   }
 
   showScore() {
+    if (this.review) return this.flash('复盘模式中，先退出复盘');
     const res = this.computeScore();
     this.scoreResult = res;
     this.showTerritory = true;
@@ -507,12 +602,15 @@ class GoScene extends Phaser.Scene {
     this.stoneObjs = Array.from({ length: n }, () => Array(n).fill(null));
     this.turn = BLACK;
     this.history = [];
+    this.moves = [];                                   // 棋谱
     this.histKeys = new Set([this.boardKey()]);
     this.captured = { [BLACK]: 0, [WHITE]: 0 };
     this.lastMove = null;
     this.passes = 0;
     this.gameOver = false;
     this.busy = false;
+    this.review = false;
+    this.step = null;
     this.scoreResult = null;
     this.showTerritory = false;
     this.tweens.killAll();                 // 清掉残留的提子缩放动画
@@ -522,6 +620,7 @@ class GoScene extends Phaser.Scene {
     this.hoverGfx.clear();
     document.getElementById('btnTerritory').textContent = '显示领地';
     this.refresh();
+    this.renderRecord();
   }
 
   // 切换棋盘大小：销毁并重建棋盘图层与坐标号（全新对象，不依赖 clear 后重画）
@@ -541,12 +640,10 @@ class GoScene extends Phaser.Scene {
     const x0 = m - f, y0 = m - f, size = (n - 1) * c + f * 2;   // 木框矩形
     g.clear();
 
-    // 桌面
-    g.fillStyle(0x1b1410, 1);
+    g.fillStyle(0x1b1410, 1);                          // 桌面
     g.fillRect(0, 0, GAME_SIZE, GAME_SIZE);
 
-    // 木框 + 棋盘底板（外深内浅双描边）
-    g.fillStyle(0xe2b978, 1);
+    g.fillStyle(0xe2b978, 1);                          // 木框 + 棋盘底板
     g.fillRoundedRect(x0, y0, size, size, 8);
     g.lineStyle(3, 0x6b4a1f, 1);
     g.strokeRoundedRect(x0, y0, size, size, 8);
@@ -560,8 +657,7 @@ class GoScene extends Phaser.Scene {
       g.lineBetween(m + i * c + h, m + h, m + i * c + h, m + (n - 1) * c + h);   // 纵线
     }
 
-    // 星位
-    g.fillStyle(0x3a2410, 1);
+    g.fillStyle(0x3a2410, 1);                          // 星位
     for (const [r, cc] of starPoints(n)) g.fillCircle(m + cc * c + h, m + r * c + h, c * 0.11);
   }
 
@@ -638,7 +734,8 @@ class GoScene extends Phaser.Scene {
   handleHover(x, y) {
     const g = this.hoverGfx;
     g.clear();
-    const ok = !this.gameOver && !this.busy && (this.mode === 'pvp' || this.turn !== this.aiColor());
+    const ok = !this.gameOver && !this.busy && !this.review &&
+               (this.mode === 'pvp' || this.turn !== this.aiColor());
     if (!ok) return;
     const pt = this.pointFromPixel(x, y);
     if (!pt || this.board[pt.r][pt.c] !== EMPTY) return;
@@ -647,6 +744,70 @@ class GoScene extends Phaser.Scene {
   }
 
   hideHover() { this.hoverGfx.clear(); }
+
+  /* ---------- 棋谱面板 ---------- */
+  renderRecord() {
+    const list = document.getElementById('recordList');
+    const count = document.getElementById('recordCount');
+    count.textContent = this.moves.length + ' 手';
+    document.getElementById('btnReview').classList.toggle('on', this.review);
+    if (!this.moves.length) {
+      list.innerHTML = '<div class="mv empty">暂无落子</div>';
+    } else {
+      const cur = this.review ? this.step : this.moves.length;
+      let html = '';
+      for (let i = 0; i < this.moves.length; i++) {
+        const mv = this.moves[i];
+        const who = mv.color === BLACK ? '黑' : '白';
+        const pos = mv.pass ? '停一手' : this.coordLabel(mv.r, mv.c);
+        const cap = mv.captured.length ? `<span class="cap">提${mv.captured.length}</span>` : '';
+        html += `<div class="mv ${i + 1 === cur ? 'cur' : ''}" data-i="${i + 1}">` +
+                `<span class="${mv.color === BLACK ? 'b' : 'w'}">${i + 1}. ${who} ${pos}</span>${cap}</div>`;
+      }
+      list.innerHTML = html;
+      const el = list.querySelector('.mv.cur');
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+    this.updateNavButtons();
+  }
+
+  updateNavButtons() {
+    const total = this.moves.length;
+    const r = this.review;
+    document.getElementById('btnFirst').disabled = !r || this.step <= 0;
+    document.getElementById('btnPrev').disabled  = !r || this.step <= 0;
+    document.getElementById('btnNext').disabled  = !r || this.step >= total;
+    document.getElementById('btnLast').disabled  = !r || this.step >= total;
+  }
+
+  exportRecord() {
+    if (!this.moves.length) { sfx.deny(); return this.flash('还没有落子可导出'); }
+    const lines = [
+      `(; GM[1] FF[4] SZ[${this.n}]`,
+      `KM[7.5] PB[黑方] PW[白方] RE[${this.gameOver && this.scoreResult ? this.scoreResult.winner + '胜' : '?'}]`
+    ];
+    for (let i = 0; i < this.moves.length; i++) {
+      const mv = this.moves[i];
+      const col = mv.pass ? '' : COLS[mv.c];
+      const tag = mv.pass ? '[]' : `[${col}${String.fromCharCode(97 + mv.r)}]`;
+      lines.push(`;${mv.color === BLACK ? 'B' : 'W'}${tag}` + (mv.captured.length ? `C[提${mv.captured.length}子]` : ''));
+    }
+    lines.push(')');
+    const text = lines.join('\n');
+    const done = () => this.flash('棋谱已复制到剪贴板（SGF 格式）');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => this.fallbackCopy(text, done));
+    } else this.fallbackCopy(text, done);
+  }
+
+  fallbackCopy(text, cb) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); cb(); } catch (e) { this.flash('复制失败，请手动选择'); }
+    document.body.removeChild(ta);
+  }
 
   /* ---------- 界面 ---------- */
   flash(msg) {
@@ -662,18 +823,23 @@ class GoScene extends Phaser.Scene {
     const turnInfo = document.getElementById('turnInfo');
     document.getElementById('capInfo').textContent =
       `黑提 ${this.captured[BLACK]} 子 · 白提 ${this.captured[WHITE]} 子`;
-    document.getElementById('moveInfo').textContent =
-      `手数：${this.history.length}` + (this.lastMove ? ` · 最后一手 ${COLS[this.lastMove.c]}${this.n - this.lastMove.r}` : '');
+    document.getElementById('moveInfo').textContent = this.review
+      ? `复盘第 ${this.step} / ${this.moves.length} 手` +
+        (this.step > 0 ? ` · ${this.moves[this.step - 1].pass ? '停一手' : this.coordLabel(this.moves[this.step - 1].r, this.moves[this.step - 1].c)}` : '')
+      : `手数：${this.history.length}` + (this.lastMove ? ` · 最后一手 ${this.coordLabel(this.lastMove.r, this.lastMove.c)}` : '');
     document.getElementById('scoreInfo').textContent = res
       ? `黑 ${res.blackTotal}（子 ${res.bs} + 地 ${res.ba}）· 白 ${res.whiteTotal}（子 ${res.ws} + 地 ${res.wa}）· 黑贴 3.75 子`
       : '';
-    if (this.gameOver) { turnInfo.textContent = '对局结束'; dot.style.background = '#777'; }
+    if (this.review) { turnInfo.textContent = `复盘模式 ${this.step}/${this.moves.length}`; dot.style.background = '#7ab8e8'; }
+    else if (this.gameOver) { turnInfo.textContent = '对局结束'; dot.style.background = '#777'; }
     else if (this.busy) { turnInfo.textContent = '电脑思考中…'; dot.style.background = '#d9a441'; }
     else {
       turnInfo.textContent = (this.turn === BLACK ? '黑棋' : '白棋') + '落子';
       dot.style.background = this.turn === BLACK ? '#111' : '#f5f5f5';
     }
-    document.getElementById('btnUndo').disabled = !this.history.length;
+    document.getElementById('btnUndo').disabled = !this.history.length || this.review;
+    document.getElementById('btnPass').disabled = this.review;
+    document.getElementById('btnScore').disabled = this.review;
   }
 
   toggleCoords() {
@@ -683,6 +849,7 @@ class GoScene extends Phaser.Scene {
   }
 
   toggleTerritory() {
+    if (this.review) return this.flash('复盘模式中，先退出复盘');
     if (!this.scoreResult) return this.flash('请先点「数地」');
     this.showTerritory = !this.showTerritory;
     this.drawTerritory(this.scoreResult);
@@ -691,8 +858,8 @@ class GoScene extends Phaser.Scene {
 
   startNewGame() {
     const size = parseInt(document.getElementById('selSize').value, 10);
-    if (size !== this.n) this.rebuildForSize(size);                       // 换大小：重建棋盘
-    else { this.mode = document.getElementById('selMode').value; this.newGame(); }  // 同大小：只重置对局
+    if (size !== this.n) this.rebuildForSize(size);                                    // 换大小：重建棋盘
+    else { this.mode = document.getElementById('selMode').value; this.newGame(); }     // 同大小：只重置对局
     sfx.start();
     this.flash(`新对局：${this.n} 路棋盘`);
     this.maybeAiFirst();
@@ -718,6 +885,24 @@ $('btnPass').addEventListener('click', () => window.__scene && window.__scene.pa
 $('btnScore').addEventListener('click', () => window.__scene && window.__scene.showScore());
 $('btnCoords').addEventListener('click', () => window.__scene && window.__scene.toggleCoords());
 $('btnTerritory').addEventListener('click', () => window.__scene && window.__scene.toggleTerritory());
+$('btnExport').addEventListener('click', () => window.__scene && window.__scene.exportRecord());
+
+$('btnReview').addEventListener('click', () => {
+  const s = window.__scene; if (!s) return;
+  s.review ? s.exitReview() : s.enterReview();
+});
+$('btnFirst').addEventListener('click', () => window.__scene && window.__scene.setStep(0));
+$('btnPrev').addEventListener('click', () => window.__scene && window.__scene.setStep(window.__scene.step - 1));
+$('btnNext').addEventListener('click', () => window.__scene && window.__scene.setStep(window.__scene.step + 1));
+$('btnLast').addEventListener('click', () => window.__scene && window.__scene.setStep(window.__scene.moves.length));
+
+// 点击棋谱任一手，直接跳到该局面
+$('recordList').addEventListener('click', e => {
+  const s = window.__scene; if (!s) return;
+  const el = e.target.closest('.mv[data-i]'); if (!el) return;
+  if (!s.review) s.enterReview();
+  s.setStep(parseInt(el.dataset.i, 10));
+});
 
 const btnSound = $('btnSound');
 btnSound.textContent = sfx.enabled ? '🔊 音效开' : '🔇 音效关';
@@ -738,6 +923,11 @@ document.addEventListener('keydown', e => {
   else if (k === 'u') s.undo();
   else if (k === 'p') s.pass();
   else if (k === 's') s.showScore();
+  else if (k === 'r') { s.review ? s.exitReview() : s.enterReview(); }
+  else if (s.review && e.key === 'ArrowLeft')  s.setStep(s.step - 1);
+  else if (s.review && e.key === 'ArrowRight') s.setStep(s.step + 1);
+  else if (s.review && e.key === 'Home')       s.setStep(0);
+  else if (s.review && e.key === 'End')        s.setStep(s.moves.length);
 });
 </script>
 </body>
