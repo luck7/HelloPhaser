@@ -114,11 +114,11 @@
     <div id="paneImport" style="display:none">
       <div class="hint">
         第一行 81 位棋盘（"." 表示空格）；第二行 81 位 01 掩码（1 = 题目给定）。<br>
-        以 # 开头的注释行会被忽略，也可直接粘贴单行「棋盘:掩码」格式。
+        注释中的 "# 难度: 中等" 会一并导入；# 开头的其他行会被忽略。
       </div>
       <textarea id="ioTextIn" spellcheck="false" placeholder="# 数独题目
-# 说明：第一行81位 . 表示空格；第二行81位 01表示是否为题目值
 # 难度: 中等
+# 用时: 02:51   错误: 0 次   提示: 0 次
 9.1..4.7.86.17...52.46.5..3.4.7..59......8.61.9.4.6.38.3...71.......3...4..56....
 101001010110110001101101001010100110000001011010101011010001100000001000100110000"></textarea>
       <div class="row">
@@ -259,15 +259,6 @@ function cellCandidates(grid, i) {
 
 /* =========================================================
  * 第二部分：导入导出
- *   导出格式（双行 + 注释头）：
- *     # 数独题目
- *     # 说明：第一行81位 . 表示空格；第二行81位 01表示是否为题目值
- *     # 难度: 中等
- *     # 用时: 02:51   错误: 0 次   提示: 0 次
- *     # 已知数字: 36 个
- *     # 导出时间: 20261005-1013
- *     <81位棋盘，. 表示空格>
- *     <81位01掩码，1 = 题目给定>
  * =======================================================*/
 function boardToString(values) {
   return values.map(v => v ? String(v) : '.').join('');
@@ -277,8 +268,6 @@ function maskToString(source) {
 }
 function pad2(n) { return String(n).padStart(2, '0'); }
 
-// withProgress = true  -> 保留玩家已填数字
-// withProgress = false -> 只保留题目给定数（适合分享）
 function buildExportCode(scene, withProgress) {
   const values = scene.values, source = scene.source;
 
@@ -299,7 +288,6 @@ function buildExportCode(scene, withProgress) {
 
   return [
     '# 数独题目',
-    '# 说明：第一行81位 . 表示空格；第二行81位 01表示是否为题目值',
     `# 难度: ${DIFFS[scene.difficulty] ? DIFFS[scene.difficulty].name : '自定义'}`,
     `# 用时: ${pad2(mm)}:${pad2(ss)}   错误: ${scene.errors} 次   提示: ${scene.hints} 次`,
     `# 已知数字: ${given} 个`,
@@ -309,31 +297,48 @@ function buildExportCode(scene, withProgress) {
   ].join('\n');
 }
 
-// 解析导入内容，返回 { values, mask, given, solutions } 或 { error }
 function parseImportCode(raw) {
   const text = String(raw || '');
   if (!text.trim()) return { error: '内容为空，请粘贴编码或选择文件' };
 
-  // 逐行处理：忽略空行与 # 注释行
-  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+  const allLines = text.split(/\r?\n/).map(s => s.trim());
 
-  // 兼容旧格式：单行 "棋盘:掩码"
+  let diffKey = null;
+  for (const ln of allLines) {
+    const m = ln.match(/^#\s*难度\s*[:：]\s*(.+)$/);
+    if (m) { diffKey = diffNameToKey(m[1].trim()); break; }
+  }
+
+  const lines = allLines.filter(s => s && !s.startsWith('#'));
+
   if (lines.length === 1 && lines[0].includes(':')) {
     const parts = lines[0].split(':');
     if (parts.length !== 2) return { error: '格式错误：最多只能有一个 ":"' };
     if (!/^[0-9.]{81}$/.test(parts[0])) return { error: '棋盘格式错误：需要 81 位，每位是 1-9 或 "." / 0' };
     if (!/^[01]{81}$/.test(parts[1])) return { error: '掩码格式错误：需要 81 位 0 或 1' };
-    return assemble(parts[0], parts[1]);
+    const r = assemble(parts[0], parts[1]);
+    return r.error ? r : Object.assign(r, { diffKey });
   }
 
-  // 新格式：第一行棋盘，第二行掩码
   let board = null, mask = null;
   for (const ln of lines) {
     if (board === null && /^[0-9.]{81}$/.test(ln)) { board = ln; continue; }
     if (board !== null && mask === null && /^[01]{81}$/.test(ln)) { mask = ln; continue; }
   }
   if (board === null) return { error: '未找到 81 位棋盘行（每位为 1-9 或 "."）' };
-  return assemble(board, mask);
+  const r = assemble(board, mask);
+  return r.error ? r : Object.assign(r, { diffKey });
+}
+
+function diffNameToKey(name) {
+  if (!name) return null;
+  const n = name.replace('难度', '').trim();
+  for (const key in DIFFS) {
+    if (key === 'custom') continue;
+    if (DIFFS[key].name === n) return key;
+  }
+  if (DIFFS[n]) return n;
+  return null;
 }
 
 function assemble(boardStr, maskStr) {
@@ -390,7 +395,7 @@ class SudokuScene extends Phaser.Scene {
     this.customEditing = false;
     this.showErrors = false;
     this.hints = 0;
-    this.errors = 0;                // 填错次数（不含提示）
+    this.errors = 0;
     this.completed = false;
     this.startTime = 0;
     this.elapsed = 0;
@@ -567,21 +572,29 @@ class SudokuScene extends Phaser.Scene {
     return n;
   }
 
+  // 需要高亮的唯一候选，按类型分开返回：
+  //   naked  —— 本格候选只剩一个（显性唯一），绿色高亮
+  //   hidden —— 某数字在某行/列/宫只有一个可放位置（隐性唯一），黄色高亮
   findUniqueCandidates() {
-    const res = new Map();
-    const add = (i, n) => { if (!res.has(i)) res.set(i, new Set()); res.get(i).add(n); };
+    const naked = new Map();
+    const hidden = new Map();
+    const add = (m, i, n) => { if (!m.has(i)) m.set(i, new Set()); m.get(i).add(n); };
+
+    // ① 显性唯一：本格候选数只剩一个
     for (let i = 0; i < 81; i++) {
       if (this.values[i] !== 0) continue;
       const s = this.candUnion(i);
-      if (s.size === 1) add(i, [...s][0]);
+      if (s.size === 1) add(naked, i, [...s][0]);
     }
+
+    // ② 隐性唯一：某数字在某单元内只有一个可放位置
     for (const unit of this.allUnits()) {
       for (let n = 1; n <= 9; n++) {
         const spots = unit.filter(i => this.values[i] === 0 && this.candUnion(i).has(n));
-        if (spots.length === 1) add(spots[0], n);
+        if (spots.length === 1) add(hidden, spots[0], n);
       }
     }
-    return res;
+    return { naked, hidden };
   }
 
   // ---------- 新游戏 ----------
@@ -607,15 +620,15 @@ class SudokuScene extends Phaser.Scene {
   }
 
   // ---------- 导入 ----------
-  applyImport(values, mask, givenCount, solCount) {
+  applyImport(values, mask, givenCount, solCount, diffKey) {
     this.solution = solveOne(values);
     this.values = values.slice();
     this.source = values.map((v, i) => {
       if (v === 0) return 0;
-      return mask ? (mask[i] === '1' ? 1 : 2) : 1;   // 无掩码：所有数字视为题目给定
+      return mask ? (mask[i] === '1' ? 1 : 2) : 1;
     });
     this.resetCandidates();
-    this.difficulty = 'custom';
+    this.difficulty = (diffKey && DIFFS[diffKey]) ? diffKey : 'custom';
     this.customEditing = false;
     this.selected = -1;
     this.hints = 0;
@@ -623,9 +636,10 @@ class SudokuScene extends Phaser.Scene {
     this.completed = false;
     this.startTime = this.time.now;
     this.elapsed = 0;
+    const diffName = DIFFS[this.difficulty].name;
     this.setMessage(solCount === 1
-      ? `导入成功！解唯一（${givenCount} 个给定数字）`
-      : `导入成功！该题有多个解（${givenCount} 个给定数字）`);
+      ? `导入成功！${diffName} · 解唯一（${givenCount} 个给定数字）`
+      : `导入成功！${diffName} · 该题有多个解（${givenCount} 个给定数字）`);
     this.updateLabels();
     this.redraw();
   }
@@ -652,12 +666,12 @@ class SudokuScene extends Phaser.Scene {
       this.source[i] = 2;
       this.manual[i].clear();
       this.auto[i].clear();
-      if (n !== this.solution[i]) this.errors++;      // 统计填错
+      if (n !== this.solution[i]) this.errors++;
       const removed = this.propagateCandidates(i, n);
       if (this.hasAuto) {
         let naked = 0;
         for (const j of this.peersOf(i)) if (this.values[j] === 0 && this.candUnion(j).size === 1) naked++;
-        if (naked > 0) this.setMessage(`已填 ${n}，清除 ${removed} 个可能项，新增 ${naked} 处唯一候选`);
+        if (naked > 0) this.setMessage(`已填 ${n}，清除 ${removed} 个可能项，新增 ${naked} 个唯一候选（绿色）`);
         else if (removed > 0) this.setMessage(`已填 ${n}，同行/列/宫清除 ${removed} 个可能项`);
       } else if (removed > 0) {
         this.setMessage(`已填 ${n}，同行/列/宫清除 ${removed} 个可能项`);
@@ -718,9 +732,11 @@ class SudokuScene extends Phaser.Scene {
         else this.auto[i].clear();
       }
       this.hasAuto = true;
-      const marks = this.findUniqueCandidates();
-      let m = 0; for (const s of marks.values()) m += s.size;
-      this.setMessage(`自动模式开启：${count} 格已填充可能项，${m} 处唯一候选已高亮`);
+      const nakedCount = this.countNakedSingles();
+      const { naked, hidden } = this.findUniqueCandidates();
+      let nMark = 0; for (const s of naked.values()) nMark += s.size;
+      let hMark = 0; for (const s of hidden.values()) hMark += s.size;
+      this.setMessage(`自动模式开启：${count} 格已填充可能项；绿色 ${nMark} 个本格唯一候选，黄色 ${hMark} 个行列宫唯一`);
     } else {
       for (let i = 0; i < 81; i++) this.auto[i].clear();
       this.hasAuto = false;
@@ -874,37 +890,64 @@ class SudokuScene extends Phaser.Scene {
     }
 
     // ---------- 网格线 ----------
-    // 关键：描边时线宽的一半在路径外侧、一半在内侧，所以必须把坐标向内偏移半个线宽，
-    // 否则竖线/横线的起点与终点不在同一直线上，看起来就是"斜的"。
-    const T = 3, TH = T / 2;                     // 粗线宽 3，偏移 1.5
+    // 描边时线宽以路径为中心向两侧各延伸一半，必须向内偏移半个线宽，
+    // 否则竖线/横线首尾不在同一直线上，看起来就是"斜的"。
+    const T = 3, TH = T / 2;
     g.lineStyle(1, 0xc4ccd6, 1);                 // 细线
     for (let i = 1; i < 9; i++) {
       if (i % 3 === 0) continue;
       g.beginPath(); g.moveTo(BX + i * CELL, BY); g.lineTo(BX + i * CELL, BY + BOARD); g.strokePath();
       g.beginPath(); g.moveTo(BX, BY + i * CELL); g.lineTo(BX + BOARD, BY + i * CELL); g.strokePath();
     }
-    g.lineStyle(T, 0x3c4a5e, 1);                 // 粗线（宫分隔）
+    g.lineStyle(T, 0x3c4a5e, 1);                 // 粗线（宫分隔），内偏半个线宽
     for (const i of [3, 6]) {
-      const x = BX + i * CELL - TH;              // 向内偏移半个线宽
+      const x = BX + i * CELL - TH;
       const y = BY + i * CELL - TH;
       g.beginPath(); g.moveTo(x, BY + TH); g.lineTo(x, BY + BOARD - TH); g.strokePath();
       g.beginPath(); g.moveTo(BX + TH, y); g.lineTo(BX + BOARD - TH, y); g.strokePath();
     }
     g.strokeRect(BX, BY, BOARD, BOARD);
 
-    const unique = this.hasAuto ? this.findUniqueCandidates() : null;
-    if (unique) {
-      for (const [i, nums] of unique) {
-        const c = i % 9, r = Math.floor(i / 9);
+    // ---------- 唯一候选高亮（仅自动模式开启时计算） ----------
+    const marks = this.hasAuto ? this.findUniqueCandidates() : null;
+
+    // 候选数在格子九宫格中的偏移
+    const candPos = (i, n) => {
+      const c = i % 9, r = Math.floor(i / 9);
+      const ox = ((n - 1) % 3 - 1) * (CELL / 3);
+      const oy = (Math.floor((n - 1) / 3) - 1) * (CELL / 3);
+      return { x: BX + c * CELL + CELL / 2 + ox, y: BY + r * CELL + CELL / 2 + oy };
+    };
+
+    // ① 隐性唯一（黄）：某数字在行/列/宫中只有一个可放位置
+    if (marks) {
+      for (const [i, nums] of marks.hidden) {
         for (const n of nums) {
-          const ox = ((n - 1) % 3 - 1) * (CELL / 3);
-          const oy = (Math.floor((n - 1) / 3) - 1) * (CELL / 3);
-          const cx = BX + c * CELL + CELL / 2 + ox;
-          const cy = BY + r * CELL + CELL / 2 + oy;
+          const p = candPos(i, n);
           g.fillStyle(0xffd257, 1);
-          g.fillRoundedRect(cx - 9, cy - 9, 18, 18, 5);
+          g.fillRoundedRect(p.x - 9, p.y - 9, 18, 18, 5);
           g.lineStyle(1.5, 0xd98f00, 1);
-          g.strokeRoundedRect(cx - 9, cy - 9, 18, 18, 5);
+          g.strokeRoundedRect(p.x - 9, p.y - 9, 18, 18, 5);
+        }
+      }
+    }
+
+    // ② 显性唯一（绿）：本格候选只剩一个 —— 直接铺满整个格子，最醒目的"必填"信号
+    if (marks) {
+      for (const [i, nums] of marks.naked) {
+        for (const n of nums) {
+          const p = candPos(i, n);
+          g.fillStyle(0x5fbf6a, 1);
+          g.fillRoundedRect(p.x - 9, p.y - 9, 18, 18, 5);
+          g.lineStyle(1.5, 0x2e7d32, 1);
+          g.strokeRoundedRect(p.x - 9, p.y - 9, 18, 18, 5);
+          // 整格淡绿底衬，提示"这一格答案已定"
+          g.fillStyle(0x9fe0a4, 0.42);
+          g.fillRect(BX + (i % 9) * CELL, BY + Math.floor(i / 9) * CELL, CELL, CELL);
+          g.fillStyle(0x5fbf6a, 1);
+          g.fillRoundedRect(p.x - 9, p.y - 9, 18, 18, 5);
+          g.lineStyle(1.5, 0x2e7d32, 1);
+          g.strokeRoundedRect(p.x - 9, p.y - 9, 18, 18, 5);
         }
       }
     }
@@ -922,11 +965,14 @@ class SudokuScene extends Phaser.Scene {
       } else {
         t.setVisible(false);
         const s = this.candUnion(i);
-        const uni = unique ? unique.get(i) : null;
+        const nm = marks && marks.naked.get(i);
+        const hm = marks && marks.hidden.get(i);
         for (let n = 1; n <= 9; n++) {
           if (!s.has(n)) continue;
           const txt = row[n - 1];
-          txt.setColor(uni && uni.has(n) ? '#7a4100' : '#5a6b7d');
+          if (nm && nm.has(n)) txt.setColor('#14561c');        // 本格唯一：深绿
+          else if (hm && hm.has(n)) txt.setColor('#7a4100');   // 行列宫唯一：深棕
+          else txt.setColor('#5a6b7d');
           txt.setText(String(n)).setVisible(true);
         }
       }
@@ -1051,7 +1097,7 @@ window.SudokuIO = {
 
   open(mode, scene) {
     this.scene = scene;
-    if (scene) scene.input.keyboard.enabled = false;   // 打开时屏蔽游戏键盘
+    if (scene) scene.input.keyboard.enabled = false;
     this.els.modal.classList.add('show');
     this.switchTab(mode || 'export');
   },
@@ -1081,8 +1127,8 @@ window.SudokuIO = {
     const given = s.source.filter(x => x === 1).length;
     const filled = s.values.filter(v => v !== 0).length;
     this.els.exportInfo.textContent = withProgress
-      ? `当前进度：${given} 个题目给定 + ${filled - given} 个已填，共 8 行`
-      : `仅题目：${given} 个给定数字，共 8 行，适合分享`;
+      ? `当前进度：${given} 个题目给定 + ${filled - given} 个已填，共 7 行`
+      : `仅题目：${given} 个给定数字，共 7 行，适合分享`;
     this.setStatus('编码已生成，可复制或保存为文件。', 'ok');
   },
 
@@ -1135,8 +1181,9 @@ window.SudokuIO = {
     if (res.error) { this.setStatus('❌ ' + res.error, 'err'); return; }
     const s = this.scene;
     if (!s) { this.setStatus('❌ 游戏未就绪', 'err'); return; }
-    s.applyImport(res.values, res.mask, res.given, res.solutions);
-    this.setStatus(`✅ 导入成功：${res.given} 个给定数字，解${res.solutions === 1 ? '唯一' : '不唯一'}`, 'ok');
+    s.applyImport(res.values, res.mask, res.given, res.solutions, res.diffKey);
+    const dn = DIFFS[s.difficulty] ? DIFFS[s.difficulty].name : '自定义';
+    this.setStatus(`✅ 导入成功：难度「${dn}」，${res.given} 个给定数字，解${res.solutions === 1 ? '唯一' : '不唯一'}`, 'ok');
     setTimeout(() => this.close(), 700);
   },
 
