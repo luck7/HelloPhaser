@@ -12,8 +12,76 @@
     background: linear-gradient(160deg, #2b2b2b 0%, #1a1a1a 100%);
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
     color: #eee;
+    padding: 18px 0;
   }
+  /* ===== 棋盘 + 右侧信息栏 ===== */
+  #wrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
   #game { box-shadow: 0 10px 40px rgba(0,0,0,.6); border-radius: 8px; overflow: hidden; }
+  #panel { width: 252px; display: flex; flex-direction: column; gap: 10px; }
+  #panel h1 {
+    margin: 0; text-align: center; font-size: 24px; letter-spacing: 4px;
+    font-family: "KaiTi", "STKaiti", "SimKai", serif; color: #f5d7a1;
+  }
+  #status {
+    background: #34495e; border-radius: 8px; padding: 9px 11px;
+    font-size: 13px; line-height: 1.6; min-height: 40px; color: #dfe6e9;
+  }
+  #status.over { background: #6b2c2c; color: #ffd9d0; }
+  #status.replay { background: #7d6608; color: #fff3c4; }
+  .box { background: rgba(0,0,0,.28); border-radius: 8px; padding: 8px; }
+  .box-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; color: #b2bec3; margin-bottom: 6px; padding: 0 2px;
+  }
+  .box-head span { font-size: 11px; color: #7f8c8d; font-family: Consolas, monospace; }
+  /* 棋谱列表 */
+  .mv { height: 250px; overflow-y: auto; font-size: 13px; }
+  .mv::-webkit-scrollbar { width: 6px; }
+  .mv::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+  .mv-row { display: flex; gap: 5px; padding: 3px 4px; border-radius: 5px; cursor: pointer; }
+  .mv-row:hover { background: rgba(255,255,255,.08); }
+  .mv-row.cur { background: rgba(241,196,15,.25); }
+  .mv-no { color: #7f8c8d; width: 20px; flex: none; text-align: right; font-family: Consolas, monospace; font-size: 12px; }
+  .mv-red { color: #ff8a80; flex: 1; }
+  .mv-black { color: #dfe6e9; flex: 1; }
+  .empty { color: #636e72; font-size: 12px; text-align: center; padding: 14px 0; }
+  /* 按钮 */
+  .btn-row { display: flex; gap: 5px; }
+  .btn-row .sm { flex: 1; }
+  .sm {
+    padding: 6px 8px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer;
+    background: #34495e; color: #fff; font-family: inherit;
+    transition: transform .12s ease, background .12s ease;
+  }
+  .sm:hover { background: #46637f; transform: translateY(-1px); }
+  .sm.wide { width: 100%; margin-top: 6px; }
+  .sm.key { background: #7d6608; }
+  .sm.key:hover { background: #a3860b; }
+  .rv-info { margin-top: 6px; font-size: 12px; color: #95a5a6; text-align: center; font-family: Consolas, monospace; }
+  .hidden { display: none !important; }
+  /* ===== 加载弹窗 ===== */
+  #modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.66);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+  }
+  #modalBox {
+    width: 430px; max-width: 92vw; background: #26292e; border-radius: 10px;
+    padding: 16px; box-shadow: 0 18px 50px rgba(0,0,0,.6);
+  }
+  #modalBox .t { font-size: 16px; color: #f5d7a1; margin-bottom: 6px; font-family: KaiTi, STKaiti, serif; }
+  #modalBox .d { font-size: 12px; color: #95a5a6; line-height: 1.7; margin-bottom: 8px; }
+  #loadText {
+    width: 100%; height: 130px; resize: vertical; background: #1b1e22; color: #dfe6e9;
+    border: 1px solid #3b4149; border-radius: 6px; padding: 8px; font-size: 13px;
+    font-family: Consolas, "Microsoft YaHei", monospace; line-height: 1.6;
+  }
+  #loadMsg { min-height: 18px; margin-top: 8px; font-size: 12px; color: #f1c40f; }
+  #toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: rgba(0,0,0,.85); color: #fff; padding: 9px 16px; border-radius: 6px;
+    font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 99;
+  }
+  #toast.show { opacity: 1; }
   .controls { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
   button, select {
     padding: 9px 16px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer;
@@ -23,12 +91,71 @@
   button:hover, select:hover { transform: translateY(-2px); }
   button.secondary, select { background: #34495e; }
   button.secondary:hover, select:hover { background: #46637f; }
-  .tip { margin-top: 10px; font-size: 13px; color: #999; max-width: 640px; text-align: center; line-height: 1.7; }
+  .tip { margin-top: 10px; font-size: 13px; color: #999; max-width: 900px; text-align: center; line-height: 1.7; }
   #aiInfo { margin-top: 8px; font-size: 12px; color: #7fb3d5; height: 16px; font-family: Consolas, monospace; }
+  @media (max-width: 900px) { #wrap { flex-direction: column; align-items: center; } }
 </style>
 </head>
 <body>
-  <div id="game"></div>
+  <div id="wrap">
+    <div id="game"></div>
+
+    <!-- ===== 右侧信息栏 ===== -->
+    <div id="panel">
+      <h1>中国象棋</h1>
+      <div id="status">红方走棋</div>
+
+      <div class="box">
+        <div class="box-head">棋谱 <span id="mvCount">0 手</span></div>
+        <div id="movelist" class="mv"><div class="empty">暂无着法</div></div>
+      </div>
+
+      <div class="box">
+        <div class="box-head">复盘 <span>← → 方向键</span></div>
+        <div class="btn-row">
+          <button class="sm" id="rvFirst" title="回到开局">⏮</button>
+          <button class="sm" id="rvPrev"  title="上一步">◀</button>
+          <button class="sm" id="rvNext"  title="下一步">▶</button>
+          <button class="sm" id="rvLast"  title="到终局">⏭</button>
+        </div>
+        <div class="rv-info" id="rvInfo">对局中</div>
+        <button class="sm wide key hidden" id="rvExit">返回对局</button>
+      </div>
+
+      <div class="box">
+        <div class="box-head">文件 <span>JSON / FEN</span></div>
+        <div class="btn-row">
+          <button class="sm" id="saveMoves">保存棋谱</button>
+          <button class="sm" id="saveFen">保存局面</button>
+        </div>
+        <button class="sm wide" id="loadBtn">加载棋谱 / 局面</button>
+      </div>
+
+      <button class="sm wide" id="copyBtn">复制棋谱文本</button>
+    </div>
+  </div>
+
+  <!-- ===== 加载弹窗 ===== -->
+  <div id="modal" class="hidden">
+    <div id="modalBox">
+      <div class="t">加载棋谱 / 局面</div>
+      <div class="d">
+        支持三种内容：<b>①</b> 本程序保存的 JSON 棋谱；<b>②</b> 传统棋谱文本（<code>1. 炮二平五 砲8平5</code>，可整局粘贴）；<b>③</b> FEN 局面串。<br>
+        也可以点「选择文件」读取 .json / .txt / .fen 文件。
+      </div>
+      <textarea id="loadText" spellcheck="false" placeholder="1. 炮二平五 砲8平5&#10;2. 马二进三 马8进7"></textarea>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="sm" id="pickFile">选择文件…</button>
+        <button class="sm key" id="doLoad">加载</button>
+        <button class="sm" id="cancelLoad">取消</button>
+      </div>
+      <input type="file" id="fileInput" accept=".json,.txt,.fen,.xqf" class="hidden">
+      <div id="loadMsg"></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
   <div class="controls">
     <button onclick="window.xiangqi.restart()">重新开始</button>
     <button class="secondary" onclick="window.xiangqi.undo()">悔棋</button>
@@ -47,7 +174,9 @@
   <div id="aiInfo"></div>
   <div class="tip">
     点击自己的棋子选中（<b style="color:#2ecc71">绿点</b>=可走，<b style="color:#e74c3c">红圈</b>=可吃），再点目标位置落子。<br>
-    AI 在 Web Worker 后台线程计算，界面不会卡住；悔棋一次回退到你上一步之前。
+    <b style="color:#f1c40f">记谱</b>采用标准四字式「名称 + 起始纵线 + 动作 + 目标」：红方纵线从右往左 一~九，黑方从左往右 1~9；
+    车/砲/将/兵 记步数，马/相/仕 记目标纵线。例：<b style="color:#ff8a80">炮二平五</b>、<b style="color:#ff8a80">马八进七</b>、<b>砲8平5</b>、<b>马8进7</b>；同纵线有多个同类棋子时用前/中/后区分（如<b>前车进一</b>）。<br>
+    右侧<b style="color:#f1c40f">棋谱</b>可点任意一手跳转；<b style="color:#f1c40f">复盘</b>用按钮或 ← → 方向键逐步推演；<b style="color:#f1c40f">保存棋谱</b>导出 JSON、<b style="color:#f1c40f">保存局面</b>导出 FEN，<b style="color:#f1c40f">加载</b>支持 JSON / 棋谱文本 / FEN。
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
@@ -59,7 +188,7 @@
 const RED='red', BLACK='black';
 const COLS=9, ROWS=10;
 const RED_NAME  ={R:'車',N:'馬',B:'相',A:'仕',K:'帥',C:'炮',P:'兵'};
-const BLACK_NAME={R:'車',N:'馬',B:'象',A:'士',K:'將',C:'炮',P:'卒'};
+const BLACK_NAME={R:'車',N:'馬',B:'象',A:'士',K:'將',C:'砲',P:'卒'};
 
 let pieces=[], board=[];
 let currentSide=RED, history=[], selected=null, legalTargets=[];
@@ -521,16 +650,55 @@ const SoundFX = {
 const AI_LEVELS={ '1':{depth:2,budget:250}, '2':{depth:4,budget:800}, '3':{depth:6,budget:2500} };
 let aiLevel='2';
 
+/* ---------- 传统记谱（标准四字式） ---------- */
+/* 红方：纵线从右往左 一~九（x=8 为 一）；黑方：纵线从左往右 1~9（x=0 为 1）
+   形式：名称 + 起始纵线 + 动作(平/进/退) + 目标
+   目标规则：马/相/仕 记目标纵线；车/砲/将/兵 记步数
+   同纵线有多个同类棋子时，改用 前/中/后 代替起始纵线 */
+const CN=['一','二','三','四','五','六','七','八','九','十'];
+function numStr(side,n){ return side===RED?CN[n-1]:String(n); }
+function fileLabel(side,x){ return numStr(side, side===RED ? 9-x : x+1); }
+function sameFileGroup(p){
+  const arr=pieces.filter(q=>!q.dead && q.side===p.side && q.type===p.type && q.x===p.x);
+  arr.sort((a,b)=> p.side===RED ? a.y-b.y : b.y-a.y);   // 前 → 后
+  return arr;
+}
+function moveNote(p,tx,ty){
+  const grp=sameFileGroup(p);
+  let head;
+  if (grp.length>1){                     // 同纵线同类：前 / 后 / 中 区分
+    const i=grp.indexOf(p);
+    let pre;
+    if (i===0) pre='前';
+    else if (i===grp.length-1) pre='后';
+    else if (grp.length===3) pre='中';
+    else pre=numStr(p.side,i+1);
+    head=pre+p.name;
+  } else {
+    head=p.name+fileLabel(p.side,p.x);   // 名称 + 起始纵线
+  }
+  const dy=ty-p.y;
+  if (dy===0) return head+'平'+fileLabel(p.side,tx);
+  const forward = p.side===RED ? dy<0 : dy>0;
+  const tail = (p.type==='N'||p.type==='B'||p.type==='A')
+             ? fileLabel(p.side,tx)                 // 斜行者记目标纵线
+             : numStr(p.side,Math.abs(dy));         // 直行者记步数
+  return head+(forward?'进':'退')+tail;
+}
+
 /* ---------- 走子 / 悔棋 ---------- */
 function applyMove(p,tx,ty,playSound){
   if (playSound===undefined) playSound=true;
   const cap=board[ty][tx];
   const fromX=p.x, fromY=p.y;
+  const note=moveNote(p,tx,ty);            // 必须在改动棋盘之前算
+  const pid=p.id;
+
   board[fromY][fromX]=null;
   if (cap) cap.dead=true;
   p.x=tx; p.y=ty; board[ty][tx]=p;
 
-  history.push({piece:p,fromX,fromY,toX:tx,toY:ty,captured:cap,prevSide:currentSide});
+  history.push({piece:p,pid:pid,fromX,fromY,toX:tx,toY:ty,captured:cap,prevSide:currentSide,note:note});
   currentSide=other(currentSide);
   selected=null; legalTargets=[];
 
@@ -546,6 +714,8 @@ function applyMove(p,tx,ty,playSound){
     statusMsg=(currentSide===RED?'红方':'黑方')+'被将军！';
     if (playSound) SoundFX.check();
   } else statusMsg='';
+
+  renderMoveList();
 }
 
 function doUndo(){
@@ -557,9 +727,11 @@ function doUndo(){
   if (l.captured){ l.captured.dead=false; board[l.toY][l.toX]=l.captured; }
   currentSide=l.prevSide;
   gameOver=false; statusMsg='';
+  renderMoveList();
 }
 
 function undo(){
+  if (replay.active) exitReplay();
   if (aiThinking){ aiToken++; aiThinking=false; }
   if (mode==='ai'){
     let idx=-1;
@@ -590,6 +762,9 @@ let sceneRef=null, aiWorker=null, workerOK=false;
 let aiReqId=0, aiReq=null;
 function aiInfoEl(){ return document.getElementById('aiInfo'); }
 
+/* AI 在对手落子后停留的时间（毫秒），想改节奏只调这里 */
+const AI_DELAY_MS=1000;
+
 function initWorker(){
   try{
     const src=document.getElementById('aiEngine').textContent;
@@ -614,12 +789,20 @@ function onAIMessage(d){
 }
 
 function maybeAITurn(){
+  if (replay.active) return;                 // 复盘期间不触发 AI
   if (mode!=='ai' || gameOver || currentSide!==aiSide) return;
-  aiThinking=true;
-  updateStatus();
-  const el=aiInfoEl(); if (el) el.textContent='AI 思考中…';
-
   const token=++aiToken;
+  aiThinking=true;                 // 停留期间也锁定输入，避免提前落子
+  updateStatus();
+  const el=aiInfoEl(); if (el) el.textContent='AI 即将走棋…';
+  setTimeout(function(){
+    if (token!==aiToken) return;   // 期间悔棋 / 重开则取消
+    startAISearch(token);
+  }, AI_DELAY_MS);
+}
+
+function startAISearch(token){
+  const el=aiInfoEl(); if (el) el.textContent='AI 思考中…';
   const cfg=AI_LEVELS[aiLevel]||AI_LEVELS['2'];
   const t0=Date.now();
   let done=false;
@@ -687,22 +870,367 @@ function redrawAndMaybeAI(){
   maybeAITurn();
 }
 
-/* ---------- 状态栏 ---------- */
+/* ---------- 右侧信息栏 ---------- */
 function updateStatus(){
-  if (!sceneRef) return;
-  let s;
-  if (gameOver) s=statusMsg;
-  else if (aiThinking) s='AI 思考中…';
+  const el=document.getElementById('status'); if (!el) return;
+  let s, cls='';
+  if (replay.active){
+    s='复盘中 · 第 '+replay.index+' / '+replay.moves.length+' 手（棋盘已锁定）';
+    cls='replay';
+  } else if (gameOver){ s=statusMsg; cls='over'; }
+  else if (aiThinking) s='AI 走棋中…';
   else {
     const who=currentSide===RED?'红方':'黑方';
     s=who+'走棋'+(mode==='ai'?(currentSide===humanSide?'（你）':'（AI）'):'')
       +(statusMsg?'　·　'+statusMsg:'');
   }
-  sceneRef.sideText.setText(s);
+  el.textContent=s;
+  el.className=cls;
 }
 
+/* 棋谱列表 */
+function renderMoveList(){
+  const box=document.getElementById('movelist'); if (!box) return;
+  document.getElementById('mvCount').textContent=history.length+' 手';
+  if (!history.length){ box.innerHTML='<div class="empty">暂无着法</div>'; return; }
+
+  const rows=[]; let cur=null;
+  for (const h of history){
+    if (h.prevSide===RED){ cur={no:rows.length+1,red:h.note,black:''}; rows.push(cur); }
+    else if (cur) cur.black=h.note;
+    else { cur={no:rows.length+1,red:'',black:h.note}; rows.push(cur); }
+  }
+  const curNo = replay.active ? (replay.index===0?0:Math.ceil(replay.index/2)) : rows.length;
+  let html='';
+  for (const r of rows){
+    const idx = r.black ? r.no*2 : r.no*2-1;
+    html+='<div class="mv-row'+(r.no===curNo?' cur':'')+'" data-idx="'+idx+'">'
+        +  '<span class="mv-no">'+r.no+'.</span>'
+        +  '<span class="mv-red">'+(r.red||'…')+'</span>'
+        +  '<span class="mv-black">'+(r.black||'')+'</span>'
+        +'</div>';
+  }
+  box.innerHTML=html;
+  const on=box.querySelector('.mv-row.cur');
+  if (on) on.scrollIntoView({block:'nearest'});
+}
+
+/* 复盘状态 */
+const replay={active:false, index:0, moves:[], backup:null};
+
+/* 只重放前 index 手，重建一套棋盘（piece.id 不变，所以显示对象可复用） */
+function replayState(index){
+  const ps=initialPieces();
+  const bd=new Array(ROWS);
+  for (let y=0;y<ROWS;y++) bd[y]=new Array(COLS).fill(null);
+  for (const p of ps) bd[p.y][p.x]=p;
+  for (let i=0;i<index;i++){
+    const h=replay.moves[i];
+    const p=ps[h.pid];
+    const cap=bd[h.toY][h.toX];
+    bd[h.fromY][h.fromX]=null;
+    if (cap) cap.dead=true;
+    p.x=h.toX; p.y=h.toY; bd[h.toY][h.toX]=p;
+  }
+  return {pieces:ps, board:bd, side: index%2===0?RED:BLACK};
+}
+
+function enterReplay(){
+  if (replay.active) return;
+  replay.moves=history;                     // 真正的着法序列
+  replay.backup={pieces:pieces, board:board, currentSide:currentSide, gameOver:gameOver,
+                 statusMsg:statusMsg, selected:selected, legalTargets:legalTargets, history:history};
+  replay.active=true;
+  showReplay(replay.moves.length, false);
+}
+
+function showReplay(index, animate){
+  if (!replay.active) return;
+  replay.index=Math.max(0, Math.min(index, replay.moves.length));
+  const st=replayState(replay.index);
+  pieces=st.pieces; board=st.board; currentSide=st.side;
+  gameOver=false; statusMsg=''; selected=null; legalTargets=[];
+  history = replay.index>0 ? [replay.moves[replay.index-1]] : [];
+  if (sceneRef) sceneRef.redraw(animate);
+  updateReplayUI();
+}
+
+function exitReplay(){
+  if (!replay.active) return;
+  const b=replay.backup;
+  pieces=b.pieces; board=b.board; currentSide=b.currentSide; gameOver=b.gameOver;
+  statusMsg=b.statusMsg; selected=b.selected; legalTargets=b.legalTargets; history=b.history;
+  replay.active=false; replay.backup=null;
+  if (sceneRef) sceneRef.redraw(false);
+  updateReplayUI();
+}
+
+function updateReplayUI(){
+  const info=document.getElementById('rvInfo');
+  if (info) info.textContent = replay.active
+    ? ('第 '+replay.index+' / '+replay.moves.length+' 手') : '对局中';
+  document.getElementById('rvExit').classList.toggle('hidden', !replay.active);
+  renderMoveList();
+  updateStatus();
+}
+
+function replayStep(delta){
+  if (!replay.active){ enterReplay(); }
+  const n=replay.index+delta;
+  if (n>replay.moves.length){ exitReplay(); return; }
+  showReplay(n, true);
+}
+
+/* ---------- 棋谱文本 / FEN / 保存 / 加载 ---------- */
+function toast(t){
+  const el=document.getElementById('toast'); if (!el) return;
+  el.textContent=t; el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t=setTimeout(function(){ el.classList.remove('show'); },2200);
+}
+function loadMsg(t){
+  const el=document.getElementById('loadMsg'); if (el) el.textContent=t||'';
+}
+
+function download(name, text, mime){
+  const b=new Blob([text],{type:mime||'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b); a.download=name;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },0);
+}
+
+/* 棋谱文本（也可用于「复制棋谱」） */
+function notationText(){
+  const lines=[]; let cur=null;
+  for (const h of history){
+    if (h.prevSide===RED){ cur=[String(lines.length+1)+'.',h.note]; lines.push(cur); }
+    else if (cur) cur.push(h.note);
+    else lines.push([String(lines.length+1)+'.','',h.note]);
+  }
+  return lines.map(a=>a.join(' ')).join('\n');
+}
+
+/* 当前局面 → FEN（红方大写、黑方小写，末尾 w/b 表示走子方） */
+function toFEN(){
+  let s='';
+  for (let y=0;y<10;y++){
+    let empty=0;
+    for (let x=0;x<9;x++){
+      const p=board[y][x];
+      if (!p){ empty++; continue; }
+      if (empty){ s+=empty; empty=0; }
+      s += p.side===RED ? p.type : p.type.toLowerCase();
+    }
+    if (empty) s+=empty;
+    if (y<9) s+='/';
+  }
+  return s+' '+(currentSide===RED?'w':'b');
+}
+
+/* 保存棋谱（JSON：着法完整数据 + 可读文本 + 终局局面） */
+function saveMoves(){
+  if (!history.length){ toast('当前没有着法可保存'); return; }
+  const data={
+    app:'中国象棋', version:1, savedAt:new Date().toISOString(),
+    mode:mode, result:statusMsg, gameOver:gameOver, fen:toFEN(),
+    notation:notationText(),
+    moves:history.map(h=>({pid:h.pid,fx:h.fromX,fy:h.fromY,tx:h.toX,ty:h.toY,note:h.note}))
+  };
+  download('xiangqi-'+Date.now()+'.json', JSON.stringify(data,null,1), 'application/json');
+  toast('已保存棋谱（'+history.length+' 手）');
+}
+
+/* 保存当前局面（FEN） */
+function saveFen(){
+  const fen=toFEN();
+  download('position-'+Date.now()+'.fen', fen);
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(fen);
+  toast('已保存局面 FEN（并已复制到剪贴板）');
+}
+
+/* 由棋子名反查类型（兼容「炮/砲」两种写法） */
+function typeByName(ch,side){
+  const t = side===RED?RED_NAME:BLACK_NAME;
+  for (const k in t) if (t[k]===ch) return k;
+  if (ch==='炮'||ch==='砲') return 'C';
+  return null;
+}
+
+/* 用传统记谱文本反查当前局面下的合法着法（与 moveNote 同一套规则，零歧义） */
+function findMoveByNote(side,note){
+  const first='前中后'.indexOf(note[0])>=0 ? note[1] : note[0];
+  const type=typeByName(first,side);
+  if (!type) return null;
+  for (const p of pieces){
+    if (p.dead||p.side!==side||p.type!==type) continue;
+    const ms=legalMovesFor(p);
+    for (let i=0;i<ms.length;i++){
+      if (moveNote(p,ms[i].x,ms[i].y)===note) return {p:p,x:ms[i].x,y:ms[i].y};
+    }
+  }
+  return null;
+}
+
+/* 加载前的公共清理 */
+function beginLoad(){
+  if (replay.active) exitReplay();
+  resetGame();
+  if (sceneRef) sceneRef.clearPieces();
+  renderMoveList();
+}
+
+function endLoad(msg){
+  if (sceneRef) sceneRef.redraw(false);
+  renderMoveList(); updateStatus();
+  maybeAITurn();               // 人机模式下载入到 AI 回合时自动接手
+  toast(msg);
+  return {ok:true,msg:msg};
+}
+
+/* ① JSON 棋谱：按 pid 精确重放 */
+function loadJSONMoves(data){
+  if (!Array.isArray(data.moves) || !data.moves.length)
+    return {ok:false,msg:'JSON 里没有着法数据'};
+  beginLoad();
+  for (let i=0;i<data.moves.length;i++){
+    const m=data.moves[i];
+    const p=pieces[m.pid];
+    if (!p || p.dead) return {ok:false,msg:'第 '+(i+1)+' 手与初始局面不匹配'};
+    if (m.tx===undefined||m.ty===undefined) return {ok:false,msg:'第 '+(i+1)+' 手缺少目标坐标'};
+    applyMove(p,m.tx,m.ty,false);
+  }
+  return endLoad('已加载棋谱：'+data.moves.length+' 手');
+}
+
+/* ② 传统棋谱文本 */
+function loadNotation(text){
+  const tokens=[];
+  const lines=text.split(/\r?\n/);
+  for (const line of lines){
+    let s=line.trim(); if (!s) continue;
+    s=s.replace(/^\d+\s*[.、．]\s*/,'');          // 行首序号 "1."
+    s=s.replace(/\s*(红方|黑方|红胜|黑胜|和棋|负)\s*$/,'');
+    for (const t of s.split(/[\s,，;；]+/)) if (t) tokens.push(t);
+  }
+  if (!tokens.length) return {ok:false,msg:'未识别到任何着法'};
+
+  beginLoad();
+  for (let i=0;i<tokens.length;i++){
+    const mv=findMoveByNote(currentSide,tokens[i]);
+    if (!mv)
+      return {ok:false,msg:'第 '+(i+1)+' 手「'+tokens[i]+'」不是合法着法（已加载前 '+i+' 手）'};
+    applyMove(mv.p,mv.x,mv.y,false);
+  }
+  return endLoad('已加载棋谱：'+tokens.length+' 手');
+}
+
+/* ③ FEN 局面 */
+function loadFEN(fen){
+  const parts=fen.trim().split(/\s+/);
+  const rows=parts[0].split('/');
+  if (rows.length!==10) return {ok:false,msg:'FEN 需要 10 行棋盘数据'};
+  const map={};
+  for (const k in RED_NAME){ map[k]={t:k,s:RED}; map[k.toLowerCase()]={t:k,s:BLACK}; }
+  const arr=[]; let id=0;
+  for (let y=0;y<10;y++){
+    let x=0;
+    for (const ch of rows[y]){
+      if (/[1-9]/.test(ch)){ x+=+ch; continue; }
+      const e=map[ch];
+      if (!e) return {ok:false,msg:'FEN 含无法识别的字符「'+ch+'」'};
+      if (x>8)  return {ok:false,msg:'FEN 第 '+(y+1)+' 行超出 9 格'};
+      arr.push({id:id++,type:e.t,side:e.s,x:x,y:y,
+                name:(e.s===RED?RED_NAME:BLACK_NAME)[e.t],dead:false});
+      x++;
+    }
+    if (x!==9) return {ok:false,msg:'FEN 第 '+(y+1)+' 行不是 9 格'};
+  }
+  const redK=arr.filter(p=>p.type==='K'&&p.side===RED).length;
+  const blackK=arr.filter(p=>p.type==='K'&&p.side===BLACK).length;
+  if (redK!==1||blackK!==1) return {ok:false,msg:'FEN 必须且只能各有一个 帥 / 將'};
+
+  beginLoad();
+  pieces=arr;
+  clearSimStack(); rebuildBoard();
+  currentSide = (parts[1]==='b') ? BLACK : RED;
+  history=[]; selected=null; legalTargets=[]; gameOver=false; statusMsg='';
+  return endLoad('已加载局面（'+(currentSide===RED?'红方':'黑方')+'走棋）');
+}
+
+/* 统一入口：自动判断内容类型 */
+function loadFromText(text){
+  text=(text||'').trim();
+  if (!text) return {ok:false,msg:'内容为空'};
+
+  if (text.charAt(0)==='{'){
+    try{
+      const d=JSON.parse(text);
+      if (d && Array.isArray(d.moves)) return loadJSONMoves(d);
+    }catch(e){}
+  }
+  const first=text.split(/\s+/)[0];
+  if (first.indexOf('/')>=0 && first.split('/').length===10) return loadFEN(text);
+  return loadNotation(text);
+}
+
+/* ---------- 信息栏事件 ---------- */
+document.getElementById('movelist').addEventListener('click',function(e){
+  const row=e.target.closest('.mv-row'); if (!row) return;
+  const n=+row.dataset.idx;
+  if (!replay.active){ if (n===history.length) return; enterReplay(); }
+  if (n===replay.moves.length) exitReplay(); else showReplay(n,true);
+});
+document.getElementById('rvFirst').onclick=function(){ enterReplay(); showReplay(0,false); };
+document.getElementById('rvPrev').onclick =function(){ replayStep(-1); };
+document.getElementById('rvNext').onclick =function(){ replayStep(1); };
+document.getElementById('rvLast').onclick =function(){ enterReplay(); showReplay(replay.moves.length,false); };
+document.getElementById('rvExit').onclick  =function(){ exitReplay(); };
+document.getElementById('saveMoves').onclick=saveMoves;
+document.getElementById('saveFen').onclick=saveFen;
+document.getElementById('copyBtn').onclick=function(){
+  if (!history.length){ toast('当前没有着法'); return; }
+  const txt=notationText();
+  const done=function(){ toast('棋谱已复制到剪贴板'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,done);
+  else done();
+};
+
+const modal=document.getElementById('modal');
+document.getElementById('loadBtn').onclick=function(){
+  loadMsg(''); modal.classList.remove('hidden');
+  document.getElementById('loadText').focus();
+};
+document.getElementById('cancelLoad').onclick=function(){ modal.classList.add('hidden'); };
+modal.addEventListener('click',function(e){ if (e.target===modal) modal.classList.add('hidden'); });
+document.getElementById('doLoad').onclick=function(){
+  const r=loadFromText(document.getElementById('loadText').value);
+  loadMsg(r.msg);
+  if (r.ok) setTimeout(function(){ modal.classList.add('hidden'); },650);
+};
+document.getElementById('pickFile').onclick=function(){ document.getElementById('fileInput').click(); };
+document.getElementById('fileInput').onchange=function(e){
+  const f=e.target.files[0]; if (!f) return;
+  const rd=new FileReader();
+  rd.onload=function(){ document.getElementById('loadText').value=rd.result; loadMsg('已读入文件：'+f.name); };
+  rd.onerror=function(){ loadMsg('文件读取失败'); };
+  rd.readAsText(f,'utf-8');
+  e.target.value='';
+};
+document.addEventListener('keydown',function(e){
+  if (!modal.classList.contains('hidden')){
+    if (e.key==='Escape') modal.classList.add('hidden');
+    return;
+  }
+  if (e.key==='ArrowLeft'){ e.preventDefault(); replayStep(-1); }
+  else if (e.key==='ArrowRight'){ e.preventDefault(); replayStep(1); }
+});
+
 /* ---------- Phaser 场景 ---------- */
-const CELL=60, MARGIN_X=55, MARGIN_Y=80;
+const CELL=60, MARGIN_X=30, MARGIN_Y=70;   // 上下多留白，坐标行才不会压到棋子
+const MOVE_MS=300;        // 棋子滑动时长（毫秒）
+const CAPTURE_MS=200;     // 被吃棋子淡出时长
+const CN2=['一','二','三','四','五','六','七','八','九','十'];   // 棋盘坐标用汉字
 
 class MainScene extends Phaser.Scene{
   constructor(){ super('main'); }
@@ -712,18 +1240,17 @@ class MainScene extends Phaser.Scene{
     this.markG =this.add.graphics();
     this.hlG   =this.add.graphics();
     this.pieceLayer=this.add.container(0,0);
+    this.pieceViews=new Map();   // piece.id -> Container，棋子复用同一显示对象才能做补间动画
 
-    this.add.text(300,26,'中国象棋',{
-      fontFamily:'KaiTi, STKaiti, SimKai, serif',fontSize:'30px',color:'#f5d7a1'
-    }).setOrigin(0.5);
-
-    this.sideText=this.add.text(300,660,'',{
-      fontFamily:'Microsoft YaHei, sans-serif',fontSize:'18px',color:'#dddddd'
-    }).setOrigin(0.5);
+    this.boardG.setDepth(0);
+    this.markG.setDepth(1);
+    this.hlG.setDepth(3);
+    this.pieceLayer.setDepth(5); // 棋子盖在坐标之上
 
     this.drawBoardStatic();
+    this.drawCoordinates();   // 上下纵线坐标，静态绘制一次即可
     resetGame();
-    this.redraw();
+    this.redraw(false);
     this.input.on('pointerdown',this.onPointerDown,this);
     sceneRef=this;
     initWorker();
@@ -755,12 +1282,29 @@ class MainScene extends Phaser.Scene{
     g.lineBetween(MARGIN_X+5*CELL,MARGIN_Y+7*CELL,  MARGIN_X+3*CELL,MARGIN_Y+9*CELL);
 
     const rs={fontFamily:'KaiTi, STKaiti, SimKai, serif',fontSize:'30px',color:'#6b4f35'};
-    this.add.text(MARGIN_X+2*CELL,MARGIN_Y+4.5*CELL,'楚  河',rs).setOrigin(0.5);
-    this.add.text(MARGIN_X+6*CELL,MARGIN_Y+4.5*CELL,'漢  界',rs).setOrigin(0.5);
+    this.add.text(MARGIN_X+2*CELL,MARGIN_Y+4.5*CELL,'楚  河',rs).setOrigin(0.5).setDepth(1);
+    this.add.text(MARGIN_X+6*CELL,MARGIN_Y+4.5*CELL,'漢  界',rs).setOrigin(0.5).setDepth(1);
 
     const m=this.markG; m.clear();
     for (const [x,y] of [[1,2],[7,2],[1,7],[7,7]]) this.drawMark(m,x,y);
     for (const [x,y] of [[0,3],[2,3],[4,3],[6,3],[8,3],[0,6],[2,6],[4,6],[6,6],[8,6]]) this.drawMark(m,x,y);
+  }
+
+  /* 上下纵线坐标（记谱用）：
+     上方 = 黑方视角，数字从左往右 1~9
+     下方 = 红方视角，汉字从右往左 一~九              */
+  drawCoordinates(){
+    const top=MARGIN_Y, bottom=MARGIN_Y+9*CELL;
+    const numStyle={fontFamily:'"PingFang SC","Microsoft YaHei",sans-serif',
+                    fontSize:'15px',color:'#34495e'};
+    const cnStyle ={fontFamily:'KaiTi, STKaiti, SimKai, serif',
+                    fontSize:'17px',color:'#a93226'};
+    for (let x=0;x<9;x++)
+      this.add.text(MARGIN_X+x*CELL, top-38, String(x+1), numStyle)
+        .setOrigin(0.5).setAlpha(0.9).setDepth(1);
+    for (let x=0;x<9;x++)
+      this.add.text(MARGIN_X+x*CELL, bottom+38, CN2[8-x], cnStyle)
+        .setOrigin(0.5).setAlpha(0.9).setDepth(1);
   }
 
   drawMark(g,x,y){
@@ -775,16 +1319,9 @@ class MainScene extends Phaser.Scene{
     }
   }
 
-  redraw(){
-    this.pieceLayer.removeAll(true);
-    this.hlG.clear();
-    for (const p of pieces) if(!p.dead) this.drawPiece(p);
-    this.drawHighlights();
-    updateStatus();
-  }
+  /* ===== 棋子显示对象：创建 / 复用 / 补间移动 ===== */
 
-  drawPiece(p){
-    const {px,py}=this.gridToPixel(p.x,p.y);
+  createPieceView(p,px,py){
     const isRed=p.side===RED;
     const main=isRed?0xc0392b:0x2c3e50;
     const g=this.add.graphics();
@@ -798,7 +1335,74 @@ class MainScene extends Phaser.Scene{
       fontFamily:'KaiTi, STKaiti, SimKai, serif',fontSize:'27px',
       color:isRed?'#c0392b':'#2c3e50'
     }).setOrigin(0.5);
-    this.pieceLayer.add(this.add.container(px,py,[g,t]));
+    const view=this.add.container(px,py,[g,t]);
+    view.setData('rx',p.x);      // 上一次渲染所在的格子（动画起点）
+    view.setData('ry',p.y);
+    view.setData('moving',false); // 是否正在滑动
+    this.pieceLayer.add(view);
+    this.pieceViews.set(p.id,view);
+    return view;
+  }
+
+  isAnimating(){
+    for (const v of this.pieceViews.values()) if (v.getData('moving')) return true;
+    return false;
+  }
+
+  clearPieces(){
+    for (const v of this.pieceViews.values()) v.destroy();
+    this.pieceViews.clear();
+  }
+
+  /* animate=false 时直接瞬移到新位置（用于开局 / 重开 / 加载） */
+  redraw(animate){
+    if (animate===undefined) animate=true;
+
+    const live=new Set();
+    for (const p of pieces){
+      if (p.dead) continue;
+      live.add(p.id);
+      const {px,py}=this.gridToPixel(p.x,p.y);
+      let view=this.pieceViews.get(p.id);
+      if (!view){ this.createPieceView(p,px,py); continue; }
+
+      const rx=view.getData('rx'), ry=view.getData('ry');
+      if (rx===p.x && ry===p.y && view.alpha===1) continue;   // 没动过，跳过
+
+      this.tweens.killTweensOf(view);
+      if (!animate){
+        view.setAlpha(1).setScale(1).setPosition(px,py);
+        view.setData('rx',p.x); view.setData('ry',p.y); view.setData('moving',false);
+        continue;
+      }
+
+      // 平滑滑动到目标格，并轻微放大表示「被拿起」
+      this.pieceLayer.bringToTop(view);
+      view.setAlpha(1).setScale(1);
+      view.setData('moving',true);
+      this.tweens.add({
+        targets:view, x:px, y:py, duration:MOVE_MS, ease:'Cubic.easeInOut',
+        onComplete:()=>{
+          view.setData('rx',p.x); view.setData('ry',p.y); view.setData('moving',false);
+        }
+      });
+      this.tweens.add({targets:view, scale:1.08, duration:MOVE_MS/2, yoyo:true, ease:'Quad.easeOut'});
+    }
+
+    // 已被吃掉的棋子：淡出 + 缩小后销毁
+    for (const [id,view] of Array.from(this.pieceViews)){
+      if (live.has(id)) continue;
+      this.pieceViews.delete(id);
+      this.tweens.killTweensOf(view);
+      if (animate){
+        this.tweens.add({targets:view, alpha:0, scale:0.5, duration:CAPTURE_MS,
+          ease:'Quad.easeIn', onComplete:()=>view.destroy()});
+      } else view.destroy();
+    }
+
+    this.hlG.clear();
+    this.drawHighlights();
+    updateStatus();
   }
 
   drawHighlights(){
@@ -829,6 +1433,8 @@ class MainScene extends Phaser.Scene{
 
   onPointerDown(pointer){
     if (gameOver || aiThinking) return;
+    if (replay.active) return;        // 复盘期间棋盘锁定
+    if (this.isAnimating()) return;   // 滑动动画期间忽略点击，避免状态错乱
     const gx=Math.round((pointer.worldX-MARGIN_X)/CELL);
     const gy=Math.round((pointer.worldY-MARGIN_Y)/CELL);
     if (!inBoard(gx,gy)) return;
@@ -859,8 +1465,10 @@ class MainScene extends Phaser.Scene{
 /* ---------- 对外控制 ---------- */
 window.xiangqi={
   restart(){
+    if (replay.active){ replay.active=false; replay.backup=null; }
     resetGame();
-    if (sceneRef) sceneRef.redraw();
+    if (sceneRef){ sceneRef.clearPieces(); sceneRef.redraw(false); }
+    renderMoveList(); updateReplayUI();
     maybeAITurn();
   },
   undo: undo,
@@ -884,7 +1492,7 @@ window.xiangqi={
 new Phaser.Game({
   type: Phaser.AUTO,
   parent:'game',
-  width:600, height:720,
+  width:540, height:670,
   backgroundColor:'#e8d3ac',
   scene:[MainScene]
 });
