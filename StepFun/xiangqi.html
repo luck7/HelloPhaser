@@ -888,14 +888,15 @@ function updateStatus(){
   el.className=cls;
 }
 
-/* 棋谱列表 */
+/* 棋谱列表：复盘时读 replay.moves（整局），平时读 history */
 function renderMoveList(){
   const box=document.getElementById('movelist'); if (!box) return;
-  document.getElementById('mvCount').textContent=history.length+' 手';
-  if (!history.length){ box.innerHTML='<div class="empty">暂无着法</div>'; return; }
+  const src = replay.active ? replay.moves : history;
+  document.getElementById('mvCount').textContent = src.length+' 手';
+  if (!src.length){ box.innerHTML='<div class="empty">暂无着法</div>'; return; }
 
   const rows=[]; let cur=null;
-  for (const h of history){
+  for (const h of src){
     if (h.prevSide===RED){ cur={no:rows.length+1,red:h.note,black:''}; rows.push(cur); }
     else if (cur) cur.black=h.note;
     else { cur={no:rows.length+1,red:'',black:h.note}; rows.push(cur); }
@@ -950,7 +951,7 @@ function showReplay(index, animate){
   const st=replayState(replay.index);
   pieces=st.pieces; board=st.board; currentSide=st.side;
   gameOver=false; statusMsg=''; selected=null; legalTargets=[];
-  history = replay.index>0 ? [replay.moves[replay.index-1]] : [];
+  history = replay.index>0 ? [replay.moves[replay.index-1]] : [];   // 仅供棋盘高亮
   if (sceneRef) sceneRef.redraw(animate);
   updateReplayUI();
 }
@@ -1184,7 +1185,7 @@ document.getElementById('movelist').addEventListener('click',function(e){
 document.getElementById('rvFirst').onclick=function(){ enterReplay(); showReplay(0,false); };
 document.getElementById('rvPrev').onclick =function(){ replayStep(-1); };
 document.getElementById('rvNext').onclick =function(){ replayStep(1); };
-document.getElementById('rvLast').onclick =function(){ enterReplay(); showReplay(replay.moves.length,false); };
+document.getElementById('rvLast').onclick=function(){ enterReplay(); showReplay(replay.moves.length,false); };
 document.getElementById('rvExit').onclick  =function(){ exitReplay(); };
 document.getElementById('saveMoves').onclick=saveMoves;
 document.getElementById('saveFen').onclick=saveFen;
