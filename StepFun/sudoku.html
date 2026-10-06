@@ -35,12 +35,105 @@
     line-height: 0;
   }
   .tip { margin-top: 12px; font-size: 12px; opacity: .75; text-align: center; line-height: 1.7; }
+
+  /* ---------- 导入导出模态框 ---------- */
+  .modal {
+    position: fixed; inset: 0; z-index: 99;
+    background: rgba(8, 16, 30, .72);
+    display: none; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .modal.show { display: flex; }
+  .modal-box {
+    width: 520px; max-width: 100%;
+    background: linear-gradient(160deg, #2b4066, #1d2c47);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 14px;
+    padding: 18px 20px 16px;
+    box-shadow: 0 22px 60px rgba(0,0,0,.55);
+  }
+  .modal-title { font-size: 18px; font-weight: 600; letter-spacing: 2px; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab {
+    flex: 1; padding: 8px 0; border: none; border-radius: 8px; cursor: pointer;
+    background: #33507d; color: #dce8f7; font-size: 14px; font-family: inherit;
+  }
+  .tab.active { background: #2e7d32; color: #fff; font-weight: 600; }
+  .hint { font-size: 12px; color: #a9bdd6; line-height: 1.7; margin-bottom: 8px; }
+  textarea {
+    width: 100%; height: 150px; resize: vertical;
+    background: #16233a; color: #ffe9a8;
+    border: 1px solid rgba(255,255,255,.18); border-radius: 8px;
+    padding: 10px; font-size: 12px; line-height: 1.6;
+    font-family: Consolas, Menlo, "Courier New", monospace;
+    white-space: pre; overflow-wrap: normal; overflow-x: auto;
+  }
+  textarea:focus { outline: none; border-color: #6ea8ff; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .row button {
+    flex: 1; min-width: 100px; padding: 9px 0; border: none; border-radius: 8px; cursor: pointer;
+    background: #3a6ea5; color: #fff; font-size: 13px; font-family: inherit;
+  }
+  .row button:hover { background: #4b82bd; }
+  .row button.primary { background: #2e7d32; }
+  .row button.primary:hover { background: #37913c; }
+  .row button.ghost { background: #40567c; }
+  .status { min-height: 18px; margin-top: 10px; font-size: 12px; line-height: 1.6; }
+  .status.ok { color: #8fe39a; }
+  .status.err { color: #ff9c9c; }
+  .status.info { color: #ffe9a8; }
 </style>
 </head>
 <body>
 <h1>数 独<span class="en">SUDOKU</span></h1>
 <div id="game"></div>
-<div class="tip">键盘：1-9 填数 · Delete 清除 · 方向键移动 · P 铅笔模式 · H 提示</div>
+<div class="tip">键盘：1-9 填数 · Delete 清除 · 方向键移动 · P 铅笔模式 · A 自动模式 · C 检查模式 · H 提示</div>
+
+<!-- 导入导出模态框 -->
+<div class="modal" id="ioModal">
+  <div class="modal-box">
+    <div class="modal-title">导入 / 导出</div>
+    <div class="tabs">
+      <button class="tab active" id="tabExport">导 出</button>
+      <button class="tab" id="tabImport">导 入</button>
+    </div>
+
+    <div id="paneExport">
+      <div class="hint" id="exportInfo"></div>
+      <textarea id="ioText" readonly spellcheck="false"></textarea>
+      <div class="row">
+        <button id="btnExpProgress" class="ghost">导出当前进度</button>
+        <button id="btnExpPuzzle" class="ghost">仅导出题目</button>
+      </div>
+      <div class="row">
+        <button id="btnCopy" class="primary">复制编码</button>
+        <button id="btnDownload" class="ghost">保存为文件</button>
+      </div>
+    </div>
+
+    <div id="paneImport" style="display:none">
+      <div class="hint">
+        第一行 81 位棋盘（"." 表示空格）；第二行 81 位 01 掩码（1 = 题目给定）。<br>
+        以 # 开头的注释行会被忽略，也可直接粘贴单行「棋盘:掩码」格式。
+      </div>
+      <textarea id="ioTextIn" spellcheck="false" placeholder="# 数独题目
+# 说明：第一行81位 . 表示空格；第二行81位 01表示是否为题目值
+# 难度: 中等
+9.1..4.7.86.17...52.46.5..3.4.7..59......8.61.9.4.6.38.3...71.......3...4..56....
+101001010110110001101101001010100110000001011010101011010001100000001000100110000"></textarea>
+      <div class="row">
+        <button id="btnFile" class="ghost">选择文件</button>
+        <button id="btnLoad" class="primary">载入题目</button>
+      </div>
+      <input type="file" id="fileInput" accept=".txt,text/plain" hidden>
+    </div>
+
+    <div class="status info" id="ioStatus">第一行 81 位棋盘，第二行 81 位 01 掩码。</div>
+    <div class="row">
+      <button id="btnCloseModal" class="ghost">关 闭</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 <script>
@@ -165,13 +258,121 @@ function cellCandidates(grid, i) {
 }
 
 /* =========================================================
- * 第二部分：Phaser 场景
+ * 第二部分：导入导出
+ *   导出格式（双行 + 注释头）：
+ *     # 数独题目
+ *     # 说明：第一行81位 . 表示空格；第二行81位 01表示是否为题目值
+ *     # 难度: 中等
+ *     # 用时: 02:51   错误: 0 次   提示: 0 次
+ *     # 已知数字: 36 个
+ *     # 导出时间: 20261005-1013
+ *     <81位棋盘，. 表示空格>
+ *     <81位01掩码，1 = 题目给定>
+ * =======================================================*/
+function boardToString(values) {
+  return values.map(v => v ? String(v) : '.').join('');
+}
+function maskToString(source) {
+  return source.map(s => s === 1 ? '1' : '0').join('');
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+// withProgress = true  -> 保留玩家已填数字
+// withProgress = false -> 只保留题目给定数（适合分享）
+function buildExportCode(scene, withProgress) {
+  const values = scene.values, source = scene.source;
+
+  let board, mask;
+  if (withProgress) {
+    board = boardToString(values);
+    mask = maskToString(source);
+  } else {
+    board = values.map((v, i) => source[i] === 1 ? v : 0);
+    board = boardToString(board);
+    mask = board.split('').map(ch => ch === '.' ? '0' : '1').join('');
+  }
+
+  const given = mask.split('').filter(ch => ch === '1').length;
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+  const mm = Math.floor(scene.elapsed / 60000), ss = Math.floor((scene.elapsed % 60000) / 1000);
+
+  return [
+    '# 数独题目',
+    '# 说明：第一行81位 . 表示空格；第二行81位 01表示是否为题目值',
+    `# 难度: ${DIFFS[scene.difficulty] ? DIFFS[scene.difficulty].name : '自定义'}`,
+    `# 用时: ${pad2(mm)}:${pad2(ss)}   错误: ${scene.errors} 次   提示: ${scene.hints} 次`,
+    `# 已知数字: ${given} 个`,
+    `# 导出时间: ${stamp}`,
+    board,
+    mask
+  ].join('\n');
+}
+
+// 解析导入内容，返回 { values, mask, given, solutions } 或 { error }
+function parseImportCode(raw) {
+  const text = String(raw || '');
+  if (!text.trim()) return { error: '内容为空，请粘贴编码或选择文件' };
+
+  // 逐行处理：忽略空行与 # 注释行
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+
+  // 兼容旧格式：单行 "棋盘:掩码"
+  if (lines.length === 1 && lines[0].includes(':')) {
+    const parts = lines[0].split(':');
+    if (parts.length !== 2) return { error: '格式错误：最多只能有一个 ":"' };
+    if (!/^[0-9.]{81}$/.test(parts[0])) return { error: '棋盘格式错误：需要 81 位，每位是 1-9 或 "." / 0' };
+    if (!/^[01]{81}$/.test(parts[1])) return { error: '掩码格式错误：需要 81 位 0 或 1' };
+    return assemble(parts[0], parts[1]);
+  }
+
+  // 新格式：第一行棋盘，第二行掩码
+  let board = null, mask = null;
+  for (const ln of lines) {
+    if (board === null && /^[0-9.]{81}$/.test(ln)) { board = ln; continue; }
+    if (board !== null && mask === null && /^[01]{81}$/.test(ln)) { mask = ln; continue; }
+  }
+  if (board === null) return { error: '未找到 81 位棋盘行（每位为 1-9 或 "."）' };
+  return assemble(board, mask);
+}
+
+function assemble(boardStr, maskStr) {
+  const values = [...boardStr].map(ch => (ch === '.' || ch === '0') ? 0 : Number(ch));
+  const given = values.filter(v => v !== 0).length;
+  if (given < 17) return { error: `给定数字只有 ${given} 个，至少需要 17 个` };
+  if (maskStr) {
+    for (let i = 0; i < 81; i++)
+      if (maskStr[i] === '1' && values[i] === 0) return { error: '掩码与棋盘不一致：有格子标记为题目给定但为空' };
+  }
+  for (let i = 0; i < 81; i++) {
+    if (values[i] === 0) continue;
+    const r = Math.floor(i / 9), c = i % 9;
+    for (let j = i + 1; j < 81; j++) {
+      if (values[j] !== values[i]) continue;
+      const r2 = Math.floor(j / 9), c2 = j % 9;
+      const sameBox = Math.floor(r / 3) === Math.floor(r2 / 3) && Math.floor(c / 3) === Math.floor(c2 / 3);
+      if (r === r2 || c === c2 || sameBox) return { error: '给定数字存在同行/列/宫冲突' };
+    }
+  }
+  const cnt = countSolutions(values, 2);
+  if (cnt === 0) return { error: '该题目无解，请检查编码' };
+  return { values, mask: maskStr, given, solutions: cnt };
+}
+
+/* =========================================================
+ * 第三部分：Phaser 场景
  * =======================================================*/
 const CELL = 56, BOARD = CELL * 9, BX = 30, BY = 30;
 const GAME_W = 880, GAME_H = 660;
-const PANEL_X = 700;            // 右侧操作面板中心（棋盘右缘 534，不重叠）
-const KEYPAD_Y = 590;           // 底部数字键盘
-const DIFFS = { easy: { holes: 40, name: '简单' }, medium: { holes: 48, name: '中等' }, hard: { holes: 54, name: '困难' } };
+const PANEL_X = 700;
+const KEYPAD_Y = 590;
+const MSG_Y = 500, MSG_W = 200, MSG_MAX_LINES = 4;
+const DIFFS = {
+  easy: { holes: 40, name: '简单' },
+  medium: { holes: 48, name: '中等' },
+  hard: { holes: 54, name: '困难' },
+  custom: { holes: 48, name: '自定义' }
+};
 
 class SudokuScene extends Phaser.Scene {
   constructor() { super('Sudoku'); }
@@ -181,24 +382,21 @@ class SudokuScene extends Phaser.Scene {
     this.solution = null;
     this.values = null;
     this.source = null;             // 0空 1题目固定 2用户 3提示
-    // 可能项（候选数）分两类维护：
-    //   manual：铅笔模式手动标记的
-    //   auto  ：「自动可能项」计算的，会随填数/删数自动增删
     this.manual = [];
     this.auto = [];
-    this.hasAuto = false;           // 是否已启用自动可能项
+    this.hasAuto = false;
     this.selected = -1;
     this.pencilMode = false;
     this.customEditing = false;
     this.showErrors = false;
     this.hints = 0;
+    this.errors = 0;                // 填错次数（不含提示）
     this.completed = false;
     this.startTime = 0;
     this.elapsed = 0;
 
     this.bg = this.add.graphics();
 
-    // 主数字文本
     this.cellTexts = [];
     for (let i = 0; i < 81; i++) {
       const r = Math.floor(i / 9), c = i % 9;
@@ -207,7 +405,6 @@ class SudokuScene extends Phaser.Scene {
       this.cellTexts.push(t);
     }
 
-    // 候选数文本（每格 9 个独立文本，按 3x3 九宫格均匀分布）
     this.candTexts = [];
     for (let i = 0; i < 81; i++) {
       const r = Math.floor(i / 9), c = i % 9;
@@ -239,26 +436,26 @@ class SudokuScene extends Phaser.Scene {
     this.add.text(PANEL_X, 30, '— 难 度 —', { fontFamily: FONT, fontSize: '16px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
     this.diffButtons = {};
     ['easy', 'medium', 'hard'].forEach((d, i) => {
-      this.diffButtons[d] = this.makeButton(PANEL_X, 68 + i * 38, 200, 32, DIFFS[d].name, 0x2f4a75, () => this.newGame(d));
+      this.diffButtons[d] = this.makeButton(PANEL_X, 66 + i * 36, 200, 30, DIFFS[d].name, 0x2f4a75, () => this.newGame(d));
     });
 
-    this.add.text(PANEL_X, 190, '— 功 能 —', { fontFamily: FONT, fontSize: '16px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
-    this.btnNew      = this.makeButton(PANEL_X, 226, 200, 32, '↻  重新出题',   0x3a6ea5, () => this.newGame(this.difficulty));
-    this.btnHint     = this.makeButton(PANEL_X, 262, 200, 32, '💡  提  示',      0x3a6ea5, () => this.giveHint());
-    this.btnPencil   = this.makeButton(PANEL_X, 298, 200, 32, '✏  铅笔模式',    0x3a6ea5, () => this.togglePencil());
-    this.btnAutoCand = this.makeButton(PANEL_X, 334, 200, 32, '🔢  自动可能项', 0x3a6ea5, () => this.autoCandidates());
-    this.btnCheck    = this.makeButton(PANEL_X, 370, 200, 32, '✔  检查错误',    0x3a6ea5, () => this.toggleErrors());
-    this.btnClear    = this.makeButton(PANEL_X, 406, 200, 32, '⌫  清除本格',    0x3a6ea5, () => this.clearCell());
-    this.btnCustom   = this.makeButton(PANEL_X, 452, 200, 34, '✎  自定义题目',  0x8a5a2b, () => this.customButton());
+    this.add.text(PANEL_X, 184, '— 功 能 —', { fontFamily: FONT, fontSize: '16px', color: '#cfe0f5', resolution: 2 }).setOrigin(0.5, 0);
+    this.btnNew      = this.makeButton(PANEL_X, 218, 200, 30, '↻  重新出题',     0x3a6ea5, () => this.newGame(this.difficulty));
+    this.btnHint     = this.makeButton(PANEL_X, 251, 200, 30, '💡  提  示',        0x3a6ea5, () => this.giveHint());
+    this.btnPencil   = this.makeButton(PANEL_X, 284, 200, 30, '✏  铅笔模式',      0x3a6ea5, () => this.togglePencil());
+    this.btnAutoCand = this.makeButton(PANEL_X, 317, 200, 30, '🔢  自动模式',      0x3a6ea5, () => this.toggleAutoMode());
+    this.btnCheck    = this.makeButton(PANEL_X, 350, 200, 30, '✔  检查模式',      0x3a6ea5, () => this.toggleErrors());
+    this.btnClear    = this.makeButton(PANEL_X, 383, 200, 30, '⌫  清除本格',      0x3a6ea5, () => this.clearCell());
+    this.btnIO       = this.makeButton(PANEL_X, 416, 200, 30, '📁  导入 / 导出',  0x6a4a8a, () => this.openIO());
+    this.btnCustom   = this.makeButton(PANEL_X, 449, 200, 32, '✎  自定义题目',    0x8a5a2b, () => this.customButton());
 
-    this.msg = this.add.text(PANEL_X, 500, '',
-      { fontFamily: FONT, fontSize: '14px', color: '#ffe9a8', wordWrap: { width: 210 }, align: 'center', lineSpacing: 5, resolution: 2 }).setOrigin(0.5, 0);
+    this.msgBg = this.add.graphics();
+    this.msg = this.add.text(PANEL_X, MSG_Y, '',
+      { fontFamily: FONT, fontSize: '13px', color: '#ffe9a8', wordWrap: { width: MSG_W }, align: 'center', lineSpacing: 4, resolution: 2 }).setOrigin(0.5, 0);
 
-    // 状态栏
-    this.stats = this.add.text(PANEL_X, 594, '',
-      { fontFamily: FONT, fontSize: '15px', color: '#cfe0f5', align: 'center', lineSpacing: 6, resolution: 2 }).setOrigin(0.5, 0);
+    this.stats = this.add.text(PANEL_X, 598, '',
+      { fontFamily: FONT, fontSize: '13px', color: '#cfe0f5', align: 'center', lineSpacing: 4, resolution: 2 }).setOrigin(0.5, 0);
 
-    // 底部数字键盘
     this.add.text(BX + BOARD / 2, 552, '数 字 键 盘', { fontFamily: FONT, fontSize: '14px', color: '#a9bdd6', resolution: 2 }).setOrigin(0.5);
     this.keypadButtons = {};
     this.keypadState = {};
@@ -270,11 +467,11 @@ class SudokuScene extends Phaser.Scene {
     this.updateLabels();
   }
 
-  // 按钮工厂：fill 为可变状态；支持 setEnabled 置灰
+  // 按钮工厂
   makeButton(x, y, w, h, label, fill, cb) {
     const c = this.add.container(x, y);
     const g = this.add.graphics();
-    const t = this.add.text(0, 0, label, { fontFamily: FONT, fontSize: '16px', color: '#ffffff', resolution: 2 }).setOrigin(0.5);
+    const t = this.add.text(0, 0, label, { fontFamily: FONT, fontSize: '15px', color: '#ffffff', resolution: 2 }).setOrigin(0.5);
     c.add([g, t]);
     const btn = { container: c, text: t, fill: fill, disabled: false, w, h };
 
@@ -315,48 +512,35 @@ class SudokuScene extends Phaser.Scene {
   }
 
   // ---------- 可能项（候选数）维护 ----------
-
-  // 与某格同行/同列/同宫的所有格子索引（不含自身）
   peersOf(i) {
     const r = Math.floor(i / 9), c = i % 9;
     const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
     const set = new Set();
-    for (let k = 0; k < 9; k++) {
-      set.add(r * 9 + k);          // 同行
-      set.add(k * 9 + c);          // 同列
-    }
-    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) set.add((br + a) * 9 + bc + b); // 同宫
+    for (let k = 0; k < 9; k++) { set.add(r * 9 + k); set.add(k * 9 + c); }
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) set.add((br + a) * 9 + bc + b);
     set.delete(i);
     return [...set];
   }
 
-  // 填入数字 n 后：从同行、同列、同宫的可能项中清除 n
   propagateCandidates(i, n) {
     let removed = 0;
     for (const j of this.peersOf(i)) {
-      if (this.values[j] !== 0) continue;         // 只影响空格
+      if (this.values[j] !== 0) continue;
       if (this.manual[j].delete(n)) removed++;
       if (this.auto[j].delete(n)) removed++;
     }
     return removed;
   }
 
-  // 重算单格的自动候选数
-  recomputeOne(j) {
-    this.auto[j] = cellCandidates(this.values, j);
-  }
+  recomputeOne(j) { this.auto[j] = cellCandidates(this.values, j); }
 
-  // 删除数字后（仅自动模式）：恢复本格 + 同行/列/宫的自动候选数
   restoreCandidates(i) {
     if (!this.hasAuto) return;
-    this.recomputeOne(i);                          // 本格恢复
+    this.recomputeOne(i);
     for (const j of this.peersOf(i)) if (this.values[j] === 0) this.recomputeOne(j);
   }
 
-  // 某格当前显示的可能项 = 手动 ∪ 自动
-  candUnion(i) {
-    return new Set([...this.manual[i], ...this.auto[i]]);
-  }
+  candUnion(i) { return new Set([...this.manual[i], ...this.auto[i]]); }
 
   resetCandidates() {
     this.manual = Array.from({ length: 81 }, () => new Set());
@@ -364,7 +548,6 @@ class SudokuScene extends Phaser.Scene {
     this.hasAuto = false;
   }
 
-  // 27 个单元（9 行 + 9 列 + 9 宫）
   allUnits() {
     const units = [];
     for (let r = 0; r < 9; r++) units.push([...Array(9)].map((_, c) => r * 9 + c));
@@ -378,17 +561,24 @@ class SudokuScene extends Phaser.Scene {
     return units;
   }
 
-  // 唯一可能项：在某行/列/宫中，某数字只能放在一个格子里 -> 该格该数字高亮
+  countNakedSingles() {
+    let n = 0;
+    for (let i = 0; i < 81; i++) if (this.values[i] === 0 && this.candUnion(i).size === 1) n++;
+    return n;
+  }
+
   findUniqueCandidates() {
     const res = new Map();
+    const add = (i, n) => { if (!res.has(i)) res.set(i, new Set()); res.get(i).add(n); };
+    for (let i = 0; i < 81; i++) {
+      if (this.values[i] !== 0) continue;
+      const s = this.candUnion(i);
+      if (s.size === 1) add(i, [...s][0]);
+    }
     for (const unit of this.allUnits()) {
       for (let n = 1; n <= 9; n++) {
         const spots = unit.filter(i => this.values[i] === 0 && this.candUnion(i).has(n));
-        if (spots.length === 1) {
-          const i = spots[0];
-          if (!res.has(i)) res.set(i, new Set());
-          res.get(i).add(n);
-        }
+        if (spots.length === 1) add(spots[0], n);
       }
     }
     return res;
@@ -396,6 +586,7 @@ class SudokuScene extends Phaser.Scene {
 
   // ---------- 新游戏 ----------
   newGame(diff) {
+    if (!DIFFS[diff]) diff = 'medium';
     this.difficulty = diff;
     this.customEditing = false;
     this.showErrors = false;
@@ -406,10 +597,35 @@ class SudokuScene extends Phaser.Scene {
     this.source = puzzle.map(v => v ? 1 : 0);
     this.resetCandidates();
     this.hints = 0;
+    this.errors = 0;
     this.completed = false;
     this.startTime = this.time.now;
     this.elapsed = 0;
-    this.setMessage(`${DIFFS[diff].name}难度 · 已生成唯一解题目，加油！`);
+    this.setMessage(`${DIFFS[diff].name}难度 · 唯一解题目已生成，加油！`);
+    this.updateLabels();
+    this.redraw();
+  }
+
+  // ---------- 导入 ----------
+  applyImport(values, mask, givenCount, solCount) {
+    this.solution = solveOne(values);
+    this.values = values.slice();
+    this.source = values.map((v, i) => {
+      if (v === 0) return 0;
+      return mask ? (mask[i] === '1' ? 1 : 2) : 1;   // 无掩码：所有数字视为题目给定
+    });
+    this.resetCandidates();
+    this.difficulty = 'custom';
+    this.customEditing = false;
+    this.selected = -1;
+    this.hints = 0;
+    this.errors = 0;
+    this.completed = false;
+    this.startTime = this.time.now;
+    this.elapsed = 0;
+    this.setMessage(solCount === 1
+      ? `导入成功！解唯一（${givenCount} 个给定数字）`
+      : `导入成功！该题有多个解（${givenCount} 个给定数字）`);
     this.updateLabels();
     this.redraw();
   }
@@ -429,41 +645,42 @@ class SudokuScene extends Phaser.Scene {
     if (i < 0 || this.source[i] === 1) return;
 
     if (this.pencilMode) {
-      // 铅笔模式：手动标记/取消可能项
       const s = this.manual[i];
       s.has(n) ? s.delete(n) : s.add(n);
     } else {
-      // 正式填入：本格可能项清空，并联动清除同行/列/宫的可能项
       this.values[i] = n;
       this.source[i] = 2;
       this.manual[i].clear();
       this.auto[i].clear();
+      if (n !== this.solution[i]) this.errors++;      // 统计填错
       const removed = this.propagateCandidates(i, n);
-      if (removed > 0) this.setMessage(`已填入 ${n}，同行/列/宫清除了 ${removed} 个可能项`);
+      if (this.hasAuto) {
+        let naked = 0;
+        for (const j of this.peersOf(i)) if (this.values[j] === 0 && this.candUnion(j).size === 1) naked++;
+        if (naked > 0) this.setMessage(`已填 ${n}，清除 ${removed} 个可能项，新增 ${naked} 处唯一候选`);
+        else if (removed > 0) this.setMessage(`已填 ${n}，同行/列/宫清除 ${removed} 个可能项`);
+      } else if (removed > 0) {
+        this.setMessage(`已填 ${n}，同行/列/宫清除 ${removed} 个可能项`);
+      }
     }
     this.checkComplete();
     this.redraw();
   }
 
-  countOf(n) {
-    let c = 0;
-    for (const v of this.values) if (v === n) c++;
-    return c;
-  }
+  countOf(n) { let c = 0; for (const v of this.values) if (v === n) c++; return c; }
 
   clearCell() {
-    // 已完成 -> 禁止清除
-    if (this.completed) { this.setMessage('恭喜完成！棋盘已锁定，不能修改。点"重新出题"开始新游戏。'); return; }
+    if (this.completed) { this.setMessage('已完成，棋盘已锁定。点"重新出题"开新局'); return; }
     const i = this.selected;
     if (i < 0) return;
     if (this.customEditing) { this.values[i] = 0; this.redraw(); return; }
-    if (this.source[i] === 1) return;               // 题目给定格不可清除
-    const had = this.values[i];
+    if (this.source[i] === 1) return;
+    if (this.values[i] === 0) { this.setMessage('该格已是空格，可能项保持不变'); return; }
     this.values[i] = 0;
     this.source[i] = 0;
     this.manual[i].clear();
     this.auto[i].clear();
-    if (had) this.restoreCandidates(i);             // 自动模式下恢复本格 + 同行/列/宫候选数
+    this.restoreCandidates(i);
     this.redraw();
   }
 
@@ -482,37 +699,40 @@ class SudokuScene extends Phaser.Scene {
     this.selected = i;
     this.hints++;
     this.checkComplete();
-    this.setMessage(`提示：第 ${Math.floor(i / 9) + 1} 行 第 ${i % 9 + 1} 列 = ${this.solution[i]}（已用 ${this.hints} 次）`);
+    this.setMessage(`提示：第 ${Math.floor(i / 9) + 1} 行 第 ${i % 9 + 1} 列 = ${this.solution[i]}（第 ${this.hints} 次）`);
     this.redraw();
   }
 
-  // ---------- 铅笔模式 ----------
   togglePencil() {
     this.pencilMode = !this.pencilMode;
-    this.setMessage(this.pencilMode ? '铅笔模式开启：输入的数字将标记为可能项' : '铅笔模式关闭：输入的数字将直接填入格子');
+    this.setMessage(this.pencilMode ? '铅笔模式开启：输入将标记为可能项' : '铅笔模式关闭：输入将直接填格');
     this.updateLabels();
   }
 
-  // ---------- 自动可能项 ----------
-  autoCandidates() {
+  toggleAutoMode() {
     if (this.completed || this.customEditing) return;
-    let count = 0;
-    for (let i = 0; i < 81; i++) {
-      if (this.values[i] === 0) { this.auto[i] = cellCandidates(this.values, i); count++; }
-      else this.auto[i].clear();
+    if (!this.hasAuto) {
+      let count = 0;
+      for (let i = 0; i < 81; i++) {
+        if (this.values[i] === 0) { this.auto[i] = cellCandidates(this.values, i); count++; }
+        else this.auto[i].clear();
+      }
+      this.hasAuto = true;
+      const marks = this.findUniqueCandidates();
+      let m = 0; for (const s of marks.values()) m += s.size;
+      this.setMessage(`自动模式开启：${count} 格已填充可能项，${m} 处唯一候选已高亮`);
+    } else {
+      for (let i = 0; i < 81; i++) this.auto[i].clear();
+      this.hasAuto = false;
+      this.setMessage('自动模式关闭，自动可能项已清除（手动的保留）');
     }
-    this.hasAuto = true;
-    const unique = this.findUniqueCandidates();
-    let uCount = 0;
-    for (const s of unique.values()) uCount += s.size;
-    this.setMessage(`已为 ${count} 个空格填充可能项；行/列/宫中唯一可放的 ${uCount} 处已用黄色高亮`);
+    this.updateLabels();
     this.redraw();
   }
 
-  // ---------- 错误检查 ----------
   toggleErrors() {
     this.showErrors = !this.showErrors;
-    this.setMessage(this.showErrors ? '错误检查开启：填错的格子会标红' : '错误检查已关闭');
+    this.setMessage(this.showErrors ? '检查模式开启：填错的格子会标红' : '检查模式关闭');
     this.updateLabels();
     this.redraw();
   }
@@ -525,7 +745,7 @@ class SudokuScene extends Phaser.Scene {
       this.selected = -1;
       this.values = new Array(81).fill(0);
       this.resetCandidates();
-      this.setMessage('编辑模式：点击格子后用键盘或数字键盘摆题，完成后点"开始游戏"。至少需要 17 个给定数字。');
+      this.setMessage('编辑模式：摆好题目后点"开始游戏"，至少需 17 个给定数字');
       this.updateLabels();
       this.redraw();
     } else {
@@ -536,36 +756,37 @@ class SudokuScene extends Phaser.Scene {
   startCustomGame() {
     const puzzle = this.values.slice();
     const given = puzzle.filter(v => v !== 0).length;
-    if (given < 17) { this.setMessage(`给定数字只有 ${given} 个，至少需要 17 个。`); return; }
+    if (given < 17) { this.setMessage(`给定数字只有 ${given} 个，至少需要 17 个`); return; }
     for (let i = 0; i < 81; i++) {
       if (puzzle[i] === 0) continue;
       const r = Math.floor(i / 9), c = i % 9;
-      for (let j = 0; j < 81; j++) {
-        if (j === i || puzzle[j] !== puzzle[i]) continue;
+      for (let j = i + 1; j < 81; j++) {
+        if (puzzle[j] !== puzzle[i]) continue;
         const r2 = Math.floor(j / 9), c2 = j % 9;
         const sameBox = Math.floor(r / 3) === Math.floor(r2 / 3) && Math.floor(c / 3) === Math.floor(c2 / 3);
-        if (r === r2 || c === c2 || sameBox) { this.setMessage('给定数字存在同行/列/宫冲突，请修改。'); return; }
+        if (r === r2 || c === c2 || sameBox) { this.setMessage('给定数字有同行/列/宫冲突，请修改'); return; }
       }
     }
     const cnt = countSolutions(puzzle, 2);
-    if (cnt === 0) { this.setMessage('该题目无解，请检查给定数字。'); return; }
+    if (cnt === 0) { this.setMessage('该题目无解，请检查给定数字'); return; }
     this.solution = solveOne(puzzle);
     this.values = puzzle.slice();
     this.source = puzzle.map(v => v ? 1 : 0);
     this.resetCandidates();
+    this.difficulty = 'custom';
     this.customEditing = false;
     this.selected = -1;
     this.hints = 0;
+    this.errors = 0;
     this.completed = false;
     this.startTime = this.time.now;
     this.elapsed = 0;
     this.setMessage(cnt === 1 ? `自定义题目开始！解唯一（${given} 个给定数字）`
-                              : `注意：该题目有多个解，已选一个继续（${given} 个给定数字）`);
+                              : `该题有多个解，已选一个继续（${given} 个给定数字）`);
     this.updateLabels();
     this.redraw();
   }
 
-  // ---------- 完成检测 ----------
   checkComplete() {
     for (let i = 0; i < 81; i++) if (this.values[i] !== this.solution[i]) return;
     this.completed = true;
@@ -574,7 +795,6 @@ class SudokuScene extends Phaser.Scene {
     this.playWinSound();
   }
 
-  // ---------- 通关音效（Web Audio 实时合成，无需外部音频文件） ----------
   playWinSound() {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -582,7 +802,6 @@ class SudokuScene extends Phaser.Scene {
       if (!this.audioCtx) this.audioCtx = new Ctx();
       const ctx = this.audioCtx;
       if (ctx.state === 'suspended') ctx.resume();
-
       const t0 = ctx.currentTime + 0.02;
       const note = (freq, start, dur, vol, type) => {
         const osc = ctx.createOscillator();
@@ -595,27 +814,23 @@ class SudokuScene extends Phaser.Scene {
         osc.connect(gain); gain.connect(ctx.destination);
         osc.start(start); osc.stop(start + dur + 0.02);
       };
-
-      // 上行欢快琶音：C5 - E5 - G5 - C6 - E6 - G6
-      const seq = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
-      seq.forEach((f, i) => note(f, t0 + i * 0.11, 0.30, 0.22));
-
-      // 收尾大三和弦 + 高八度点缀，营造"达成"感
+      [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98].forEach((f, i) => note(f, t0 + i * 0.11, 0.30, 0.22));
       [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => note(f, t0 + 0.68 + i * 0.005, 0.75, 0.16, 'sine'));
-      note(2093.00, t0 + 0.70, 0.45, 0.10, 'sine');   // C7 闪光
+      note(2093.00, t0 + 0.70, 0.45, 0.10, 'sine');
       note(1567.98, t0 + 0.90, 0.55, 0.09, 'triangle');
-    } catch (e) { /* 浏览器不支持音频时静默降级 */ }
+    } catch (e) {}
+  }
+
+  openIO() {
+    if (window.SudokuIO) window.SudokuIO.open('export', this);
   }
 
   // ---------- 绘制 ----------
   redraw() {
     const g = this.bg;
     g.clear();
-
-    // ① 棋盘底色
     g.fillStyle(0xfdfdfd, 1).fillRect(BX, BY, BOARD, BOARD);
 
-    // ② 选中格的行/列/宫高亮
     if (this.selected >= 0) {
       const r = Math.floor(this.selected / 9), c = this.selected % 9;
       g.fillStyle(0xeaf2fc, 1);
@@ -631,11 +846,9 @@ class SudokuScene extends Phaser.Scene {
       }
     }
 
-    // ③ 题目固定格底纹
     g.fillStyle(0xeeeeee, 0.85);
     for (let i = 0; i < 81; i++) if (this.source[i] === 1) g.fillRect(BX + (i % 9) * CELL, BY + Math.floor(i / 9) * CELL, CELL, CELL);
 
-    // ④ 错误格底纹
     if (this.showErrors && !this.customEditing) {
       g.fillStyle(0xffd2d2, 0.9);
       for (let i = 0; i < 81; i++)
@@ -643,7 +856,6 @@ class SudokuScene extends Phaser.Scene {
           g.fillRect(BX + (i % 9) * CELL, BY + Math.floor(i / 9) * CELL, CELL, CELL);
     }
 
-    // ⑤ 点击了已有数字的格子 -> 高亮全盘所有相同数字
     if (this.selected >= 0 && this.values[this.selected]) {
       const target = this.values[this.selected];
       g.fillStyle(0xbfe3b8, 1);
@@ -656,30 +868,31 @@ class SudokuScene extends Phaser.Scene {
           g.strokeRect(BX + (i % 9) * CELL + 1, BY + Math.floor(i / 9) * CELL + 1, CELL - 2, CELL - 2);
     }
 
-    // ⑥ 选中格自身
     if (this.selected >= 0) {
       const r = Math.floor(this.selected / 9), c = this.selected % 9;
       g.fillStyle(0xbcd9ff, 1).fillRect(BX + c * CELL, BY + r * CELL, CELL, CELL);
     }
 
-    // 网格线
-    g.lineStyle(1, 0xc4ccd6, 1);
+    // ---------- 网格线 ----------
+    // 关键：描边时线宽的一半在路径外侧、一半在内侧，所以必须把坐标向内偏移半个线宽，
+    // 否则竖线/横线的起点与终点不在同一直线上，看起来就是"斜的"。
+    const T = 3, TH = T / 2;                     // 粗线宽 3，偏移 1.5
+    g.lineStyle(1, 0xc4ccd6, 1);                 // 细线
     for (let i = 1; i < 9; i++) {
       if (i % 3 === 0) continue;
       g.beginPath(); g.moveTo(BX + i * CELL, BY); g.lineTo(BX + i * CELL, BY + BOARD); g.strokePath();
       g.beginPath(); g.moveTo(BX, BY + i * CELL); g.lineTo(BX + BOARD, BY + i * CELL); g.strokePath();
     }
-    g.lineStyle(3, 0x3c4a5e, 1);
+    g.lineStyle(T, 0x3c4a5e, 1);                 // 粗线（宫分隔）
     for (const i of [3, 6]) {
-      g.beginPath(); g.moveTo(BX + i * CELL, BY); g.lineTo(BX + i * CELL, BY + BOARD); g.strokePath();
-      g.beginPath(); g.moveTo(BX, BY + i * CELL); g.lineTo(BX + BOARD, BY + i * CELL); g.strokePath();
+      const x = BX + i * CELL - TH;              // 向内偏移半个线宽
+      const y = BY + i * CELL - TH;
+      g.beginPath(); g.moveTo(x, BY + TH); g.lineTo(x, BY + BOARD - TH); g.strokePath();
+      g.beginPath(); g.moveTo(BX + TH, y); g.lineTo(BX + BOARD - TH, y); g.strokePath();
     }
     g.strokeRect(BX, BY, BOARD, BOARD);
 
-    // 唯一可能项（仅自动模式开启时计算）
     const unique = this.hasAuto ? this.findUniqueCandidates() : null;
-
-    // 唯一可能项高亮底衬（先铺，再画文字）
     if (unique) {
       for (const [i, nums] of unique) {
         const c = i % 9, r = Math.floor(i / 9);
@@ -696,7 +909,6 @@ class SudokuScene extends Phaser.Scene {
       }
     }
 
-    // 数字 + 3x3 均匀分布的候选数
     for (let i = 0; i < 81; i++) {
       const v = this.values[i];
       const t = this.cellTexts[i], row = this.candTexts[i];
@@ -714,8 +926,7 @@ class SudokuScene extends Phaser.Scene {
         for (let n = 1; n <= 9; n++) {
           if (!s.has(n)) continue;
           const txt = row[n - 1];
-          const isUni = uni && uni.has(n);
-          txt.setColor(isUni ? '#7a4100' : '#5a6b7d');
+          txt.setColor(uni && uni.has(n) ? '#7a4100' : '#5a6b7d');
           txt.setText(String(n)).setVisible(true);
         }
       }
@@ -725,7 +936,6 @@ class SudokuScene extends Phaser.Scene {
     this.drawStats();
   }
 
-  // 数字键盘：某数字在棋盘上已满 9 个 -> 按钮置灰
   updateKeypad() {
     for (let n = 1; n <= 9; n++) {
       const done = this.countOf(n) >= 9;
@@ -741,16 +951,17 @@ class SudokuScene extends Phaser.Scene {
     const mm = Math.floor(this.elapsed / 60000), ss = Math.floor((this.elapsed % 60000) / 1000);
     this.stats.setText([
       `难度：${DIFFS[this.difficulty].name}    提示：${this.hints} 次`,
-      `用时：${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+      `用时：${pad2(mm)}:${pad2(ss)}    错误：${this.errors} 次`
     ]);
   }
 
-  // ---------- 键盘 ----------
   onKey(e) {
     const k = e.key;
     if (k >= '1' && k <= '9') { this.inputNumber(parseInt(k, 10)); e.preventDefault(); }
     else if (k === 'Delete' || k === 'Backspace' || k === '0') { this.clearCell(); e.preventDefault(); }
     else if (k === 'p' || k === 'P') this.togglePencil();
+    else if (k === 'a' || k === 'A') this.toggleAutoMode();
+    else if (k === 'c' || k === 'C') this.toggleErrors();
     else if (k === 'h' || k === 'H') this.giveHint();
     else if (k.startsWith('Arrow')) {
       e.preventDefault();
@@ -767,19 +978,28 @@ class SudokuScene extends Phaser.Scene {
     }
   }
 
-  setMessage(s) { this.msg.setText(s); }
+  setMessage(s) {
+    this.msg.setText(s);
+    let t = s, guard = 0;
+    while (this.msg.getWrappedText().length > MSG_MAX_LINES && t.length > 6 && guard++ < 300) {
+      t = t.slice(0, -2);
+      this.msg.setText(t + '…');
+    }
+    const h = this.msg.height + 14;
+    this.msgBg.clear();
+    this.msgBg.fillStyle(0x16233a, 0.55);
+    this.msgBg.fillRoundedRect(PANEL_X - MSG_W / 2, MSG_Y - 7, MSG_W, h, 8);
+  }
 
-  // ---------- 按钮状态 ----------
   updateLabels() {
     this.btnPencil.text.setText(this.pencilMode ? '✏  铅笔模式：开' : '✏  铅笔模式');
     this.btnPencil.setFill(this.pencilMode ? 0x2e7d32 : 0x3a6ea5);
-
-    this.btnCheck.text.setText(this.showErrors ? '✔  检查错误：开' : '✔  检查错误');
-    this.btnCheck.setFill(this.showErrors ? 0x8a2b2b : 0x3a6ea5);
-
+    this.btnAutoCand.text.setText(this.hasAuto ? '🔢  自动模式：开' : '🔢  自动模式');
+    this.btnAutoCand.setFill(this.hasAuto ? 0x2e7d32 : 0x3a6ea5);
+    this.btnCheck.text.setText(this.showErrors ? '✔  检查模式：开' : '✔  检查模式');
+    this.btnCheck.setFill(this.showErrors ? 0x2e7d32 : 0x3a6ea5);
     this.btnCustom.text.setText(this.customEditing ? '▶  开始游戏' : '✎  自定义题目');
     this.btnCustom.setFill(this.customEditing ? 0x2e7d32 : 0x8a5a2b);
-
     for (const d in this.diffButtons) {
       const on = (d === this.difficulty) && !this.customEditing;
       this.diffButtons[d].setFill(on ? 0x1f8a4c : 0x2f4a75);
@@ -793,6 +1013,140 @@ class SudokuScene extends Phaser.Scene {
     }
   }
 }
+
+/* =========================================================
+ * 第四部分：模态框逻辑（DOM 层）
+ * =======================================================*/
+window.SudokuIO = {
+  scene: null,
+  currentCode: '',
+  withProgress: true,
+  els: {},
+
+  init() {
+    const $ = id => document.getElementById(id);
+    this.els = {
+      modal: $('ioModal'), tabExport: $('tabExport'), tabImport: $('tabImport'),
+      paneExport: $('paneExport'), paneImport: $('paneImport'),
+      text: $('ioText'), textIn: $('ioTextIn'), status: $('ioStatus'),
+      exportInfo: $('exportInfo'), file: $('fileInput')
+    };
+
+    this.els.tabExport.onclick = () => this.switchTab('export');
+    this.els.tabImport.onclick = () => this.switchTab('import');
+    $('btnCloseModal').onclick = () => this.close();
+    this.els.modal.onclick = e => { if (e.target === this.els.modal) this.close(); };
+
+    $('btnCopy').onclick = () => this.copy();
+    $('btnDownload').onclick = () => this.download();
+    $('btnExpProgress').onclick = () => this.refresh(true);
+    $('btnExpPuzzle').onclick = () => this.refresh(false);
+    $('btnFile').onclick = () => this.els.file.click();
+    this.els.file.onchange = e => this.readFile(e);
+    $('btnLoad').onclick = () => this.load();
+    this.els.textIn.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.load();
+    });
+  },
+
+  open(mode, scene) {
+    this.scene = scene;
+    if (scene) scene.input.keyboard.enabled = false;   // 打开时屏蔽游戏键盘
+    this.els.modal.classList.add('show');
+    this.switchTab(mode || 'export');
+  },
+
+  close() {
+    this.els.modal.classList.remove('show');
+    if (this.scene) this.scene.input.keyboard.enabled = true;
+    this.setStatus('第一行 81 位棋盘，第二行 81 位 01 掩码。', 'info');
+  },
+
+  switchTab(mode) {
+    this.els.tabExport.classList.toggle('active', mode === 'export');
+    this.els.tabImport.classList.toggle('active', mode === 'import');
+    this.els.paneExport.style.display = mode === 'export' ? '' : 'none';
+    this.els.paneImport.style.display = mode === 'import' ? '' : 'none';
+    this.setStatus('第一行 81 位棋盘，第二行 81 位 01 掩码。', 'info');
+    if (mode === 'export') this.refresh(this.withProgress);
+    if (mode === 'import') setTimeout(() => this.els.textIn.focus(), 30);
+  },
+
+  refresh(withProgress) {
+    const s = this.scene;
+    if (!s || !s.values) return;
+    this.withProgress = withProgress;
+    this.currentCode = buildExportCode(s, withProgress);
+    this.els.text.value = this.currentCode;
+    const given = s.source.filter(x => x === 1).length;
+    const filled = s.values.filter(v => v !== 0).length;
+    this.els.exportInfo.textContent = withProgress
+      ? `当前进度：${given} 个题目给定 + ${filled - given} 个已填，共 8 行`
+      : `仅题目：${given} 个给定数字，共 8 行，适合分享`;
+    this.setStatus('编码已生成，可复制或保存为文件。', 'ok');
+  },
+
+  async copy() {
+    if (!this.currentCode) { this.setStatus('没有可复制的编码', 'err'); return; }
+    let ok = false;
+    try { await navigator.clipboard.writeText(this.currentCode); ok = true; }
+    catch (e) {
+      this.els.text.removeAttribute('readonly');
+      this.els.text.select();
+      try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+      this.els.text.setAttribute('readonly', 'readonly');
+    }
+    this.setStatus(ok ? '✅ 已复制到剪贴板' : '复制失败，请手动选择文本复制', ok ? 'ok' : 'err');
+  },
+
+  download() {
+    if (!this.currentCode) { this.setStatus('没有可保存的编码', 'err'); return; }
+    const s = this.scene;
+    const diff = s && DIFFS[s.difficulty] ? DIFFS[s.difficulty].name : 'sudoku';
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const name = `sudoku-${diff}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.txt`;
+    const blob = new Blob([this.currentCode], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    this.setStatus(`✅ 已保存为 ${name}`, 'ok');
+  },
+
+  readFile(e) {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.els.textIn.value = String(reader.result || '').trim();
+      this.setStatus(`已读取文件 ${f.name}，点"载入题目"开始游戏`, 'ok');
+    };
+    reader.onerror = () => this.setStatus('文件读取失败', 'err');
+    reader.readAsText(f);
+    e.target.value = '';
+  },
+
+  load() {
+    const res = parseImportCode(this.els.textIn.value);
+    if (res.error) { this.setStatus('❌ ' + res.error, 'err'); return; }
+    const s = this.scene;
+    if (!s) { this.setStatus('❌ 游戏未就绪', 'err'); return; }
+    s.applyImport(res.values, res.mask, res.given, res.solutions);
+    this.setStatus(`✅ 导入成功：${res.given} 个给定数字，解${res.solutions === 1 ? '唯一' : '不唯一'}`, 'ok');
+    setTimeout(() => this.close(), 700);
+  },
+
+  setStatus(msg, type) {
+    this.els.status.textContent = msg;
+    this.els.status.className = 'status ' + (type || 'info');
+  }
+};
+document.addEventListener('DOMContentLoaded', () => window.SudokuIO.init());
+if (document.readyState !== 'loading') window.SudokuIO.init();
 
 new Phaser.Game({
   type: Phaser.AUTO,
