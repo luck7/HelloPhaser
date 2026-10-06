@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phaser 围棋 · Weiqi</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+  :root{ --bg:#241c14; --panel:#33281d; --line:#5a452c; --text:#f3e6cf; --accent:#d9a441; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; padding:22px; color:var(--text);
+    background:radial-gradient(circle at 30% 8%, #3a2d20, #17110b 70%);
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    display:flex; align-items:flex-start; justify-content:center; gap:22px; flex-wrap:wrap;
+  }
+  h1{ font-size:20px; margin:0 0 4px; letter-spacing:3px; }
+  .sub{ font-size:12px; opacity:.6; margin-bottom:12px; }
+  #game{ border-radius:12px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.6); }
+  #panel{ width:300px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  button,select{
+    background:linear-gradient(#4a3a28,#382b1d); color:var(--text); border:1px solid #6b5334;
+    border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer; transition:.15s;
+  }
+  button:hover,select:hover{ border-color:var(--accent); transform:translateY(-1px); }
+  button:disabled{ opacity:.4; cursor:not-allowed; transform:none; }
+  .info{ font-size:13px; line-height:1.9; background:#2a2118; border:1px solid var(--line);
+         border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+  #msg{ min-height:20px; font-size:13px; color:var(--accent); margin-bottom:8px; }
+  #msg.flash{ animation:blink .45s; }
+  @keyframes blink{ 0%,100%{opacity:1} 50%{opacity:.2} }
+  .turn-dot{ display:inline-block; width:13px; height:13px; border-radius:50%;
+             vertical-align:-2px; margin-right:6px; border:1px solid #000; background:#111; }
+  details{ font-size:12px; line-height:1.85; opacity:.85; }
+  summary{ cursor:pointer; color:var(--accent); margin-bottom:6px; }
+  kbd{ background:#4a3a28; border:1px solid #6b5334; border-radius:4px; padding:0 4px; font-size:11px; }
+</style>
+</head>
+<body>
+<div>
+  <h1>围 棋</h1>
+  <div class="sub">Phaser 3 渲染 · 本地双人 / 人机对战 · 切换棋盘或模式将开始新对局</div>
+  <div id="game"></div>
+</div>
+
+<div id="panel">
+  <div class="info">
+    <div><span id="turnDot" class="turn-dot"></span><span id="turnInfo">黑棋落子</span></div>
+    <div id="capInfo">黑提 0 子 · 白提 0 子</div>
+    <div id="moveInfo">手数：0</div>
+    <div id="scoreInfo" style="color:#9fd39f"></div>
+  </div>
+
+  <div id="msg"></div>
+
+  <div class="row">
+    <button id="btnNew">新对局 <kbd>N</kbd></button>
+    <button id="btnUndo">悔棋 <kbd>U</kbd></button>
+    <button id="btnPass">停一手 <kbd>P</kbd></button>
+    <button id="btnScore">数地 <kbd>S</kbd></button>
+  </div>
+  <div class="row">
+    <select id="selSize">
+      <option value="19" selected>19 路棋盘</option>
+      <option value="13">13 路棋盘</option>
+      <option value="9">9 路棋盘</option>
+    </select>
+    <select id="selMode">
+      <option value="pvp">双人对弈</option>
+      <option value="ai-black" selected>人机 · 我执黑</option>
+      <option value="ai-white">人机 · 我执白</option>
+    </select>
+  </div>
+  <div class="row">
+    <button id="btnCoords">隐藏坐标</button>
+    <button id="btnTerritory">显示领地</button>
+  </div>
+
+  <details>
+    <summary>规则速记（点击展开）</summary>
+    <p><b>气</b>：棋子上下左右紧邻的空交叉点。同色棋子相连成一“块”，共享气。</p>
+    <p><b>提子</b>：落子后对方某块气为 0，整块拿走。</p>
+    <p><b>禁自杀</b>：落子后自己这块气为 0 且没有提子，禁着。</p>
+    <p><b>打劫</b>：刚形成的棋盘局面不能立刻重现（全局同形禁着），防止无限循环。</p>
+    <p><b>终局</b>：双方连续停一手即终局，按中国规则数子（黑贴 3.75 子）。</p>
+  </details>
+</div>
+
+<script>
+/* ================= 常量与工具 ================= */
+const EMPTY = 0, BLACK = 1, WHITE = 2;
+const other = c => (c === BLACK ? WHITE : BLACK);
+const COLS = 'ABCDEFGHJKLMNOPQRST';   // 列标按惯例跳过 I
+const GAME_SIZE = 616;                // 画布固定边长，小棋盘自动居中
+let boardSize = 19;
+
+function starPoints(n) {
+  const s = n === 19 ? [3, 9, 15] : n === 13 ? [3, 6, 9] : [2, 4, 6];
+  const pts = [];
+  for (const r of s) for (const c of s) pts.push([r, c]);
+  return pts;
+}
+
+/* ================= 场景：舞台 + 导演 ================= */
+class GoScene extends Phaser.Scene {
+  constructor() { super('GoScene'); }
+
+  init(data) { this.n = (data && data.size) || boardSize; }
+
+  create() {
+    const n = this.n;
+    this.cell = 30;
+    this.margin = (GAME_SIZE - (n - 1) * this.cell) / 2;   // 小棋盘居中偏移
+    this.radius = this.cell * 0.45;
+    this.mode = document.getElementById('selMode').value;
+    this.showCoords = true;
+    this.showTerritory = false;
+    this.scoreResult = null;
+    this.busy = false;
+
+    // 图层顺序：棋盘 → 领地标记 → 棋子 → 最后一手标记 → 悬停预览
+    this.boardGfx = this.add.graphics();
+    this.territoryGfx = this.add.graphics();
+    this.stoneLayer = this.add.container(0, 0);
+    this.markerGfx = this.add.graphics();
+    this.hoverGfx = this.add.graphics();
+
+    this.newGame();
+    this.createLabels();
+
+    this.input.on('pointerdown', p => {
+      const pt = this.pointFromPixel(p.x, p.y);
+      if (!pt) return;
+      if (this.mode !== 'pvp' && this.turn === this.aiColor()) return; // 电脑回合屏蔽点击
+      this.placeStone(pt.r, pt.c);
+    });
+    this.input.on('pointermove', p => this.handleHover(p.x, p.y));
+
+    window.__scene = this;
+
+    // 人机模式且电脑执黑时，电脑先走
+    if (this.mode !== 'pvp' && this.turn === this.aiColor()) {
+      this.busy = true; this.refresh();
+      this.time.delayedCall(500, () => { this.busy = false; this.aiMove(); });
+    }
+  }
+
+  /* ---------- 坐标换算 ---------- */
+  pos(i) { return this.margin + i * this.cell; }
+  px(c) { return this.pos(c); }
+  py(r) { return this.pos(r); }
+
+  pointFromPixel(x, y) {
+    const n = this.n, c = this.cell;
+    const i = Math.round((x - this.margin) / c);
+    const j = Math.round((y - this.margin) / c);
+    if (i < 0 || j < 0 || i >= n || j >= n) return null;
+    if (Math.abs(x - this.pos(i)) > c * 0.5 || Math.abs(y - this.pos(j)) > c * 0.5) return null;
+    return { r: j, c: i };
+  }
+
+  neighbors(r, c) {
+    const out = [], n = this.n;
+    if (r > 0) out.push([r - 1, c]);
+    if (r < n - 1) out.push([r + 1, c]);
+    if (c > 0) out.push([r, c - 1]);
+    if (c < n - 1) out.push([r, c + 1]);
+    return out;
+  }
+
+  /* ---------- 核心规则 ---------- */
+  // 找出一块棋：返回 { stones:[[r,c]...], liberties:气数 }
+  group(r, c) {
+    const color = this.board[r][c];
+    const seen = new Set([r + ',' + c]);
+    const stack = [[r, c]], stones = [], libs = new Set();
+    while (stack.length) {
+      const [cr, cc] = stack.pop();
+      stones.push([cr, cc]);
+      for (const [nr, nc] of this.neighbors(cr, cc)) {
+        const v = this.board[nr][nc];
+        if (v === EMPTY) libs.add(nr + ',' + nc);
+        else if (v === color && !seen.has(nr + ',' + nc)) {
+          seen.add(nr + ',' + nc); stack.push([nr, nc]);
+        }
+      }
+    }
+    return { stones, liberties: libs.size };
+  }
+
+  boardKey() { return this.board.map(row => row.join('')).join('/'); }
+
+  // 只推演、不落盘：返回 null 表示禁着；否则 { stones: 被提棋子, ko: 是否打劫禁着 }
+  simulate(r, c, color) {
+    if (this.board[r][c] !== EMPTY) return null;
+    const opp = other(color);
+    this.board[r][c] = color;
+    const captured = [];
+    for (const [nr, nc] of this.neighbors(r, c)) {
+      if (this.board[nr][nc] === opp) {
+        const g = this.group(nr, nc);
+        if (g.liberties === 0) captured.push(...g.stones);
+      }
+    }
+    if (captured.length === 0 && this.group(r, c).liberties === 0) {
+      this.board[r][c] = EMPTY;                    // 禁自杀
+      return null;
+    }
+    const ko = this.histKeys.has(this.boardKey()); // 全局同形禁着（打劫）
+    this.board[r][c] = EMPTY;
+    return { stones: captured, ko };
+  }
+
+  placeStone(r, c) {
+    if (this.gameOver) return this.flash('对局已结束，请开始新对局');
+    const color = this.turn;
+    const sim = this.simulate(r, c, color);
+    if (!sim) return this.flash('禁着点：这里落子会自杀');
+    if (sim.ko) return this.flash('打劫禁着：不能立刻提回');
+
+    const prevBoard = this.board.map(row => row.slice());
+    this.board[r][c] = color;
+    for (const [cr, cc] of sim.stones) this.board[cr][cc] = EMPTY;
+    if (sim.stones.length) this.captured[color] += sim.stones.length;
+
+    const key = this.boardKey();
+    this.histKeys.add(key);
+    this.history.push({
+      board: prevBoard, turn: color, captured: { ...this.captured },
+      lastMove: this.lastMove, passes: this.passes, key
+    });
+
+    this.lastMove = { r, c };
+    this.passes = 0;
+    this.spawnStone(r, c, color);
+    for (const [cr, cc] of sim.stones) this.removeStone(cr, cc);
+    this.turn = other(color);
+
+    this.drawMarker();
+    this.hideHover();
+    this.refresh();
+    this.afterMove();
+  }
+
+  pass() {
+    if (this.gameOver) return this.flash('对局已结束，请开始新对局');
+    const color = this.turn;
+    this.history.push({
+      board: this.board.map(row => row.slice()), turn: color,
+      captured: { ...this.captured }, lastMove: this.lastMove, passes: this.passes, key: null
+    });
+    this.passes++;
+    this.lastMove = null;
+    this.turn = other(color);
+    this.drawMarker();
+    this.refresh();
+    this.flash((color === BLACK ? '黑' : '白') + '方停一手');
+    this.afterMove();
+  }
+
+  afterMove() {
+    if (this.passes >= 2) { this.showScore(); return; }   // 双方连续停一手 → 终局
+    if (this.mode !== 'pvp' && !this.gameOver && this.turn === this.aiColor()) {
+      this.busy = true; this.refresh();
+      this.time.delayedCall(380, () => { this.busy = false; this.aiMove(); });
+    }
+  }
+
+  undo() {
+    if (!this.history.length) return this.flash('没有可悔的棋');
+    const target = this.mode === 'pvp' ? null : this.humanColor();
+    this.undoOnce();
+    while (target && this.history.length && this.turn !== target) this.undoOnce();
+    this.gameOver = false;
+    this.busy = false;
+    this.scoreResult = null;
+    this.showTerritory = false;
+    this.territoryGfx.clear();
+    document.getElementById('btnTerritory').textContent = '显示领地';
+    this.redrawStones();
+    this.drawMarker();
+    this.refresh();
+    this.flash('已悔棋');
+    // 悔棋后若轮到电脑，让它继续走
+    if (this.mode !== 'pvp' && !this.gameOver && this.turn === this.aiColor()) {
+      this.busy = true; this.refresh();
+      this.time.delayedCall(400, () => { this.busy = false; this.aiMove(); });
+    }
+  }
+
+  undoOnce() {
+    const h = this.history.pop();
+    if (!h) return;
+    if (h.key) this.histKeys.delete(h.key);
+    this.board = h.board.map(row => row.slice());
+    this.turn = h.turn;
+    this.captured = { ...h.captured };
+    this.lastMove = h.lastMove;
+    this.passes = h.passes;
+  }
+
+  /* ---------- 数地（中国规则 · 数子法） ---------- */
+  computeScore() {
+    const n = this.n;
+    const owner = new Array(n * n).fill(0);            // 1 黑地 2 白地 0 公共
+    const visited = new Array(n * n).fill(false);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const idx = r * n + c;
+      if (this.board[r][c] !== EMPTY || visited[idx]) continue;
+      const stack = [[r, c]], cells = [], colors = new Set();
+      visited[idx] = true;
+      while (stack.length) {
+        const [cr, cc] = stack.pop();
+        cells.push([cr, cc]);
+        for (const [nr, nc] of this.neighbors(cr, cc)) {
+          const v = this.board[nr][nc], j = nr * n + nc;
+          if (v === EMPTY) { if (!visited[j]) { visited[j] = true; stack.push([nr, nc]); } }
+          else colors.add(v);
+        }
+      }
+      const o = colors.size === 1 ? [...colors][0] : 0;   // 只挨一种颜色 → 该方地
+      for (const [cr, cc] of cells) owner[cr * n + cc] = o;
+    }
+    let bs = 0, ws = 0, ba = 0, wa = 0;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const v = this.board[r][c], o = owner[r * n + c];
+      if (v === BLACK) bs++; else if (v === WHITE) ws++;
+      else if (o === BLACK) ba++; else if (o === WHITE) wa++;
+    }
+    const blackTotal = bs + ba, whiteTotal = ws + wa;
+    const blackAdj = blackTotal - 3.75;                  // 黑贴 3.75 子（=7.5 目）
+    const winner = blackAdj > whiteTotal ? '黑棋' : '白棋';
+    return { bs, ws, ba, wa, blackTotal, whiteTotal, owner, winner, margin: Math.abs(blackAdj - whiteTotal) };
+  }
+
+  showScore() {
+    const res = this.computeScore();
+    this.scoreResult = res;
+    this.showTerritory = true;
+    document.getElementById('btnTerritory').textContent = '隐藏领地';
+    this.drawTerritory(res);
+    this.gameOver = true;
+    this.busy = false;
+    this.hideHover();
+    this.flash(`数地：黑 ${res.blackTotal} 子 / 白 ${res.whiteTotal} 子 → ${res.winner}胜 ${res.margin.toFixed(2)} 子`);
+    this.refresh(res);
+  }
+
+  /* ---------- 简易 AI（启发式，非强 AI） ---------- */
+  aiColor() { return this.mode === 'ai-black' ? WHITE : BLACK; }
+  humanColor() { return other(this.aiColor()); }
+
+  aiMove() {
+    if (this.gameOver) return;
+    const n = this.n, color = this.turn, cands = [];
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (this.board[r][c] !== EMPTY) continue;
+      const sim = this.simulate(r, c, color);
+      if (!sim || sim.ko) continue;
+      cands.push({ r, c, s: this.evalPoint(r, c, color, sim) });
+    }
+    if (!cands.length || Math.random() < 0.02) { this.pass(); return; }
+    cands.sort((a, b) => b.s - a.s);
+    this.placeStone(cands[0].r, cands[0].c);
+  }
+
+  evalPoint(r, c, color, sim) {
+    const opp = other(color), n = this.n;
+    let s = Math.random() * 1.5;
+    s += sim.stones.length * 8;                       // 能提子优先
+    let own = 0, foe = 0;
+    for (const [nr, nc] of this.neighbors(r, c)) {
+      const v = this.board[nr][nc];
+      if (v === color) own++; else if (v === opp) foe++;
+    }
+    s += foe * 2.2 - own * 0.8;                      // 进攻 + 联系
+    if (own === 0 && foe === 0) s += 1.0;            // 开新方向
+    const d = Math.min(r, c, n - 1 - r, n - 1 - c);  // 线位：三/四线最值钱
+    if (d === 2) s += 3.0; else if (d === 3) s += 2.4;
+    else if (d === 1) s += 1.6; else if (d === 0) s += 0.4; else s -= 0.6;
+    for (const [sr, sc] of starPoints(n)) {          // 靠近星位加分
+      const dist = Math.abs(sr - r) + Math.abs(sc - c);
+      if (dist <= 2) s += (3 - dist) * 1.6;
+    }
+    if (sim.stones.length === 0 && own >= 3) s -= 10; // 别自填眼
+    return s;
+  }
+
+  /* ---------- 绘制 ---------- */
+  newGame() {
+    const n = this.n;
+    this.board = Array.from({ length: n }, () => Array(n).fill(EMPTY));
+    this.stoneObjs = Array.from({ length: n }, () => Array(n).fill(null));
+    this.turn = BLACK;
+    this.history = [];
+    this.histKeys = new Set([this.boardKey()]);
+    this.captured = { [BLACK]: 0, [WHITE]: 0 };
+    this.lastMove = null;
+    this.passes = 0;
+    this.gameOver = false;
+    this.busy = false;
+    this.scoreResult = null;
+    this.showTerritory = false;
+    this.stoneLayer.removeAll(true);
+    this.territoryGfx.clear();
+    this.hoverGfx.clear();
+    this.drawBoard();
+    this.drawMarker();
+    this.refresh();
+    document.getElementById('btnTerritory').textContent = '显示领地';
+  }
+
+  drawBoard() {
+    const g = this.boardGfx, n = this.n, m = this.margin, c = this.cell;
+    g.clear();
+    g.fillStyle(0xe8c17a, 1);
+    g.fillRoundedRect(0, 0, GAME_SIZE, GAME_SIZE, 10);
+    g.lineStyle(2, 0x8a5a22, 1);
+    g.strokeRoundedRect(m - c * 0.75, m - c * 0.75, (n - 1) * c + c * 1.5, (n - 1) * c + c * 1.5, 4);
+    g.lineStyle(1, 0x6b4a1f, 1);
+    for (let i = 0; i < n; i++) {
+      g.lineBetween(m, m + i * c, m + (n - 1) * c, m + i * c);
+      g.lineBetween(m + i * c, m, m + i * c, m + (n - 1) * c);
+    }
+    g.fillStyle(0x3a2410, 1);
+    for (const [r, cc] of starPoints(n)) g.fillCircle(m + cc * c, m + r * c, c * 0.11);
+  }
+
+  createLabels() {
+    if (this.coordTexts) this.coordTexts.forEach(t => t.destroy());
+    this.coordTexts = [];
+    const n = this.n, m = this.margin, c = this.cell;
+    const st = { fontFamily: 'system-ui', fontSize: Math.max(10, Math.round(c * 0.34)) + 'px', color: '#7a5a2a' };
+    for (let i = 0; i < n; i++) {
+      this.coordTexts.push(
+        this.add.text(m + i * c, m - c * 0.62, COLS[i], st).setOrigin(0.5),
+        this.add.text(m + i * c, m + (n - 1) * c + c * 0.32, COLS[i], st).setOrigin(0.5),
+        this.add.text(m - c * 0.62, m + i * c, String(n - i), st).setOrigin(0.5),
+        this.add.text(m + (n - 1) * c + c * 0.62, m + i * c, String(n - i), st).setOrigin(0.5)
+      );
+    }
+    this.coordTexts.forEach(t => t.setVisible(this.showCoords));
+  }
+
+  spawnStone(r, c, color) {
+    const s = this.add.circle(this.px(c), this.py(r), this.radius,
+      color === BLACK ? 0x1b1b1b : 0xf7f7f7);
+    s.setStrokeStyle(1.5, color === BLACK ? 0x000000 : 0x9a9a9a, 0.9);
+    s.setScale(0.4);
+    this.stoneLayer.add(s);
+    this.tweens.add({ targets: s, scale: 1, duration: 140, ease: 'Back.easeOut' });
+    this.stoneObjs[r][c] = s;
+  }
+
+  removeStone(r, c) {
+    const s = this.stoneObjs[r][c];
+    this.stoneObjs[r][c] = null;
+    if (s) this.tweens.add({ targets: s, scale: 0, duration: 160, ease: 'Quad.easeIn', onComplete: () => s.destroy() });
+  }
+
+  redrawStones() {
+    this.stoneLayer.removeAll(true);
+    const n = this.n;
+    this.stoneObjs = Array.from({ length: n }, () => Array(n).fill(null));
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const v = this.board[r][c];
+      if (v === EMPTY) continue;
+      const s = this.add.circle(this.px(c), this.py(r), this.radius, v === BLACK ? 0x1b1b1b : 0xf7f7f7);
+      s.setStrokeStyle(1.5, v === BLACK ? 0x000000 : 0x9a9a9a, 0.9);
+      this.stoneLayer.add(s);
+      this.stoneObjs[r][c] = s;
+    }
+  }
+
+  drawMarker() {
+    this.markerGfx.clear();
+    if (!this.lastMove) return;
+    const v = this.board[this.lastMove.r][this.lastMove.c];
+    if (v === EMPTY) return;
+    this.markerGfx.fillStyle(v === BLACK ? 0xff5a5a : 0xd81f1f, 0.95);
+    this.markerGfx.fillCircle(this.px(this.lastMove.c), this.py(this.lastMove.r), this.radius * 0.34);
+  }
+
+  drawTerritory(res) {
+    const g = this.territoryGfx, n = this.n;
+    g.clear();
+    if (!this.showTerritory || !res) return;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (this.board[r][c] !== EMPTY) continue;
+      const o = res.owner[r * n + c];
+      if (!o) continue;
+      g.fillStyle(o === BLACK ? 0x000000 : 0xffffff, 0.45);
+      g.fillRect(this.px(c) - this.radius * 0.28, this.py(r) - this.radius * 0.28,
+                 this.radius * 0.56, this.radius * 0.56);
+    }
+  }
+
+  handleHover(x, y) {
+    const g = this.hoverGfx;
+    g.clear();
+    const ok = !this.gameOver && !this.busy && (this.mode === 'pvp' || this.turn !== this.aiColor());
+    if (!ok) return;
+    const pt = this.pointFromPixel(x, y);
+    if (!pt || this.board[pt.r][pt.c] !== EMPTY) return;
+    g.fillStyle(this.turn === BLACK ? 0x111111 : 0xffffff, 0.35);
+    g.fillCircle(this.px(pt.c), this.py(pt.r), this.radius * 0.92);
+  }
+
+  hideHover() { this.hoverGfx.clear(); }
+
+  /* ---------- 界面 ---------- */
+  flash(msg) {
+    const el = document.getElementById('msg');
+    el.textContent = msg;
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+  }
+
+  refresh(res) {
+    const dot = document.getElementById('turnDot');
+    const turnInfo = document.getElementById('turnInfo');
+    document.getElementById('capInfo').textContent =
+      `黑提 ${this.captured[BLACK]} 子 · 白提 ${this.captured[WHITE]} 子`;
+    document.getElementById('moveInfo').textContent =
+      `手数：${this.history.length}` + (this.lastMove ? ` · 最后一手 ${COLS[this.lastMove.c]}${this.n - this.lastMove.r}` : '');
+    document.getElementById('scoreInfo').textContent = res
+      ? `黑 ${res.blackTotal}（子 ${res.bs} + 地 ${res.ba}）· 白 ${res.whiteTotal}（子 ${res.ws} + 地 ${res.wa}）· 黑贴 3.75 子`
+      : '';
+    if (this.gameOver) { turnInfo.textContent = '对局结束'; dot.style.background = '#777'; }
+    else if (this.busy) { turnInfo.textContent = '电脑思考中…'; dot.style.background = '#d9a441'; }
+    else {
+      turnInfo.textContent = (this.turn === BLACK ? '黑棋' : '白棋') + '落子';
+      dot.style.background = this.turn === BLACK ? '#111' : '#f5f5f5';
+    }
+    document.getElementById('btnUndo').disabled = !this.history.length;
+  }
+
+  toggleCoords() {
+    this.showCoords = !this.showCoords;
+    this.coordTexts.forEach(t => t.setVisible(this.showCoords));
+    document.getElementById('btnCoords').textContent = this.showCoords ? '隐藏坐标' : '显示坐标';
+  }
+
+  toggleTerritory() {
+    if (!this.scoreResult) return this.flash('请先点「数地」');
+    this.showTerritory = !this.showTerritory;
+    this.drawTerritory(this.scoreResult);
+    document.getElementById('btnTerritory').textContent = this.showTerritory ? '隐藏领地' : '显示领地';
+  }
+
+  startNewGame() {
+    const size = parseInt(document.getElementById('selSize').value, 10);
+    if (size !== this.n) { boardSize = size; this.scene.restart({ size }); }
+    else { this.mode = document.getElementById('selMode').value; this.newGame(); }
+    this.flash(`新对局：${size} 路棋盘`);
+  }
+}
+
+/* ================= 启动 ================= */
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: GAME_SIZE,
+  height: GAME_SIZE,
+  parent: 'game',
+  backgroundColor: '#241c14',
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_HORIZONTALLY },
+  scene: [GoScene]
+});
+
+/* ================= DOM 控制台与 Phaser 的桥梁 ================= */
+const $ = id => document.getElementById(id);
+$('btnNew').addEventListener('click', () => window.__scene && window.__scene.startNewGame());
+$('btnUndo').addEventListener('click', () => window.__scene && window.__scene.undo());
+$('btnPass').addEventListener('click', () => window.__scene && window.__scene.pass());
+$('btnScore').addEventListener('click', () => window.__scene && window.__scene.showScore());
+$('btnCoords').addEventListener('click', () => window.__scene && window.__scene.toggleCoords());
+$('btnTerritory').addEventListener('click', () => window.__scene && window.__scene.toggleTerritory());
+$('selSize').addEventListener('change', () => window.__scene && window.__scene.startNewGame());
+$('selMode').addEventListener('change', () => window.__scene && window.__scene.startNewGame());
+
+document.addEventListener('keydown', e => {
+  const s = window.__scene;
+  if (!s || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'n') s.startNewGame();
+  else if (k === 'u') s.undo();
+  else if (k === 'p') s.pass();
+  else if (k === 's') s.showScore();
+});
+</script>
+</body>
+</html>
