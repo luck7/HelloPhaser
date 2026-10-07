@@ -22,8 +22,8 @@ const BOARD_PX = CELL * 8;
 const W = OFFSET + BOARD_PX + OFFSET + 210;
 const H = OFFSET + BOARD_PX + OFFSET;
 
-const RED = 1, RED_K = 2;      // 红方：红先，向下走（行号增大）
-const BLACK = -1, BLACK_K = -2; // 黑方：向上走（行号减小）
+const RED = 1, RED_K = 2;      // 红方：红先，向上走（行号减小，从底部向顶部推进）
+const BLACK = -1, BLACK_K = -2; // 黑方：向下走（行号增大，从顶部向底部推进）
 
 /* ============ 规则引擎 ============ */
 function inB(r, c) { return r >= 0 && r < ROWS && c >= 0 && c < COLS; }
@@ -32,12 +32,14 @@ function isKing(v) { return Math.abs(v) === 2; }
 // 普通棋子只能朝前；王可四向。jump=true 时步长为 2
 function dirsFor(v, jump) {
   const f = jump ? 2 : 1;
-  const s = v > 0 ? 1 : -1;
+  // 红方在底部向上推进（s=-1）；黑方在顶部向下推进（s=+1）
+  const s = v > 0 ? -1 : 1;
   if (isKing(v)) return [[-f, -f], [-f, f], [f, -f], [f, f]];
   return [[s * f, -f], [s * f, f]];
 }
 function willPromote(v, r) {
-  return !isKing(v) && ((v === RED && r === ROWS - 1) || (v === BLACK && r === 0));
+  // 红方升王在顶部 r=0；黑方升王在底部 r=ROWS-1
+  return !isKing(v) && ((v === RED && r === 0) || (v === BLACK && r === ROWS - 1));
 }
 function cloneBoard(b) { return b.map(row => row.slice()); }
 
