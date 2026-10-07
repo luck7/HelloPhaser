@@ -22,58 +22,8 @@
 <div class="hint">点击棋子查看合法走法 · 绿点=可走 · 红圈=可吃 · U 悔棋 / R 重开 / M 菜单</div>
 <div id="loadErr"></div>
 
-<!-- ========== 第一段：Phaser 加载器（多 CDN 回退） ========== -->
+<script src="phaser.min.js"></script>
 <script>
-(function () {
-  var CDNS = [
-    'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js',
-    'https://fastly.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js',
-    'https://unpkg.com/phaser@3.80.1/dist/phaser.min.js',
-    'https://cdn.staticfile.org/phaser/3.80.1/phaser.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js'
-  ];
-  var i = 0;
-  function fail() {
-    var e = document.getElementById('loadErr');
-    e.style.display = 'block';
-    e.innerHTML =
-      '<h2>Phaser 加载失败</h2>' +
-      '<p>所有 CDN 都无法访问（多为网络/防火墙原因）。</p>' +
-      '<p>解决办法：下载 <b>phaser.min.js</b> 放到本 HTML 同一目录，' +
-      '然后把第一个 <code>&lt;script&gt;</code> 段整段替换成<br>' +
-      '<code>&lt;script src="phaser.min.js"&gt;&lt;/script&gt;</code>，即可离线运行。</p>';
-  }
-  function next() {
-    if (i >= CDNS.length) { fail(); return; }
-    var s = document.createElement('script');
-    s.src = CDNS[i++];
-    s.onload = function () {
-      if (window.Phaser && typeof Phaser.Game === 'function') {
-        if (window.bootGame) window.bootGame(); else fail();
-      } else { next(); }
-    };
-    s.onerror = function () { next(); };
-    document.head.appendChild(s);
-  }
-  /* 先尝试同步加载一次；失败再走异步回退链 */
-  document.write('<script src="' + CDNS[0] + '"><\/script>');
-  i = 1;
-  window.addEventListener('load', function () {
-    if (window.Phaser && typeof Phaser.Game === 'function') {
-      if (window.bootGame) window.bootGame();
-    } else {
-      next();
-    }
-  });
-})();
-</script>
-
-<!-- ========== 第二段：游戏代码（等 Phaser 就绪后才执行） ========== -->
-<script>
-window.bootGame = function () {
-  if (window.__booted) return;
-  window.__booted = true;
-
   function showFatal(msg) {
     var e = document.getElementById('loadErr');
     e.style.display = 'block';
@@ -929,7 +879,7 @@ window.bootGame = function () {
   } catch (e) {
     showFatal(e && e.message ? e.message : String(e));
   }
-};
+
 </script>
 </body>
 </html>
